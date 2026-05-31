@@ -2,9 +2,11 @@
 RSS Fetcher — poll feeds, filter by company keywords, lưu article_meta.
 Chạy theo interval trong scheduler.
 """
+import asyncio
+import html as html_lib
 import logging
 import re
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
 from urllib.parse import urlencode
 
@@ -109,9 +111,11 @@ async def poll_feeds() -> list[int]:
                     )
                     new_article_ids.extend(ids)
 
-            # Google News RSS — 1 feed per company
+            # Google News RSS — 1 feed per company, delay 1s để tránh rate limit
             google_source_db_id = db_sources.get("google_news_template")
-            for company in companies_with_id:
+            for i, company in enumerate(companies_with_id):
+                if i > 0:
+                    await asyncio.sleep(1)
                 url = _build_google_rss_url(company)
                 entries = await _fetch_feed(url, client)
                 for entry in entries:
@@ -150,11 +154,25 @@ async def _save_entry(
 
     published_at = _parse_pubdate(entry)
 
+    # Unescape HTML entities (e.g. &nbsp; → space) rồi normalize whitespace
+    title_clean = re.sub(r"\s+", " ", html_lib.unescape(title)).strip()
+
+    # Dedup theo title trong 24h — bắt cùng bài xuất hiện ở nhiều nguồn (Google News + CafeF...)
+    since_24h = datetime.now(timezone.utc) - timedelta(hours=24)
+    title_exists = await session.scalar(
+        select(ArticleMeta.id)
+        .where(ArticleMeta.title == title_clean)
+        .where(ArticleMeta.fetched_at >= since_24h)
+        .limit(1)
+    )
+    if title_exists:
+        return []
+
     stmt = (
         pg_insert(ArticleMeta)
         .values(
             url=url,
-            title=title.strip(),
+            title=title_clean,
             summary=summary_clean[:2000] if summary_clean else None,
             source_id=source_db_id,
             company_id=company_id,

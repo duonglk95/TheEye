@@ -15,8 +15,10 @@ Setup group:
   3. Bật "Group Privacy" = OFF trong BotFather
      (hoặc dùng /command@YourBotName trong group)
 """
+import io
 import logging
 import os
+import re
 from datetime import datetime, timedelta, timezone
 
 from telegram import Update, BotCommand
@@ -33,6 +35,13 @@ from app.notifier.report_builder import (
     build_overview_report,
     build_top_report,
     get_all_companies,
+    search_articles,
+)
+from app.notifier.alert_config import (
+    get_watchlist,
+    add_ticker,
+    remove_ticker,
+    reset_to_all,
 )
 
 log = logging.getLogger(__name__)
@@ -76,22 +85,27 @@ async def cmd_help(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
     """Gửi danh sách lệnh."""
     text = (
         "👁 <b>The-Eye — Trợ lý theo dõi tin doanh nghiệp</b>\n\n"
-        "<b>Lệnh:</b>\n"
-        "  /report <code>TICKER</code> <i>[24h|48h|7d]</i>\n"
-        "    → Báo cáo chi tiết 1 công ty\n\n"
-        "  /all <i>[24h|48h|7d]</i>\n"
-        "    → Tổng quan tất cả công ty\n\n"
-        "  /top <code>pos</code>|<code>neg</code> <i>[24h|48h|7d]</i>\n"
-        "    → Top tin tích cực / tiêu cực\n\n"
-        "  /list\n"
-        "    → Danh sách ticker đang theo dõi\n\n"
-        "  /status\n"
-        "    → Trạng thái hệ thống\n\n"
+        "<b>📊 Báo cáo:</b>\n"
+        "  /report <code>TICKER</code> <i>[24h|48h|7d]</i> — Báo cáo 1 công ty\n"
+        "  /all <i>[24h|48h|7d]</i> — Tổng quan tất cả\n"
+        "  /top <code>pos</code>|<code>neg</code> <i>[7d]</i> — Top tin POS/NEG\n"
+        "  /list — Danh sách ticker đang theo dõi\n\n"
+        "<b>🔎 Tìm kiếm & Xuất dữ liệu:</b>\n"
+        "  /search <code>từ khóa</code> <i>[7d]</i> — Tìm bài theo từ khóa\n"
+        "  /export <i>[24h|48h|7d]</i> — Xuất CSV về máy\n\n"
+        "<b>🔔 Heading News (NEG tức thì):</b>\n"
+        "  /watching — Xem cấu hình hiện tại\n"
+        "  /watch <code>TICKER</code> — Bật cho ticker\n"
+        "  /unwatch <code>TICKER</code> — Tắt cho ticker\n"
+        "  /watchall — Nhận từ tất cả ticker\n\n"
+        "<b>⚙️ Hệ thống:</b>\n"
+        "  /ping — Kiểm tra RSS feeds\n"
+        "  /status — Trạng thái hệ thống\n\n"
         "<b>Ví dụ:</b>\n"
-        "  <code>/report VIC</code>\n"
         "  <code>/report SBT 48h</code>\n"
-        "  <code>/top neg 7d</code>\n"
-        "  <code>/all</code>"
+        "  <code>/search lợi nhuận giảm 7d</code>\n"
+        "  <code>/export 7d</code>\n"
+        "  <code>/watch NAF</code>"
     )
     await update.message.reply_text(text, parse_mode=ParseMode.HTML)
 
@@ -246,6 +260,227 @@ async def cmd_status(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
     await update.message.reply_text(text, parse_mode=ParseMode.HTML)
 
 
+async def cmd_search(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+    """/search KEYWORD [24h|48h|7d] — tìm bài theo từ khóa."""
+    if not ctx.args:
+        await update.message.reply_text(
+            "⚠️ Thiếu từ khóa. Ví dụ: <code>/search lợi nhuận tăng</code> hoặc <code>/search SBT 7d</code>",
+            parse_mode=ParseMode.HTML,
+        )
+        return
+
+    # Phân tích args: từ khóa là tất cả trừ arg cuối nếu là khoảng thời gian
+    args = ctx.args
+    if args and re.match(r"^\d+[hd]$", args[-1], re.IGNORECASE):
+        hours = _parse_hours(args[-1])
+        keyword = " ".join(args[:-1])
+    else:
+        hours = 48
+        keyword = " ".join(args)
+
+    if not keyword:
+        await update.message.reply_text("⚠️ Thiếu từ khóa.", parse_mode=ParseMode.HTML)
+        return
+
+    wait_msg = await update.message.reply_text(
+        f"🔍 Đang tìm «<b>{keyword}</b>»...", parse_mode=ParseMode.HTML
+    )
+    result = await search_articles(keyword, hours)
+    await wait_msg.delete()
+    await update.message.reply_text(
+        result,
+        parse_mode=ParseMode.HTML,
+        disable_web_page_preview=True,
+    )
+
+
+async def cmd_ping(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+    """/ping — kiểm tra trạng thái tất cả RSS feeds."""
+    import time
+    import httpx as _httpx
+    from app.config import load_sources
+
+    sources = [s for s in load_sources() if s.get("active") and s.get("type") != "google_rss"]
+    wait_msg = await update.message.reply_text(
+        f"⏳ Đang kiểm tra {len(sources)} feeds...", parse_mode=ParseMode.HTML
+    )
+
+    lines = ["🔍 <b>KIỂM TRA RSS FEEDS</b>\n"]
+    ok_count = 0
+    async with _httpx.AsyncClient() as client:
+        for src in sources:
+            t0 = time.monotonic()
+            try:
+                resp = await client.head(
+                    src["url"], timeout=8, follow_redirects=True,
+                    headers={"User-Agent": "Mozilla/5.0 (compatible; TheEye/1.0)"},
+                )
+                ms = int((time.monotonic() - t0) * 1000)
+                if resp.status_code < 400:
+                    status = "✅"
+                    ok_count += 1
+                else:
+                    status = f"⚠️ {resp.status_code}"
+                lines.append(f"{status} {src['name'][:45]}  <i>({ms}ms)</i>")
+            except Exception as e:
+                ms = int((time.monotonic() - t0) * 1000)
+                lines.append(f"❌ {src['name'][:45]}  <i>{str(e)[:40]}</i>")
+
+    lines.append(f"\n<b>{ok_count}/{len(sources)}</b> feeds hoạt động bình thường.")
+    await wait_msg.delete()
+    await update.message.reply_text("\n".join(lines), parse_mode=ParseMode.HTML)
+
+
+async def cmd_export(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+    """/export [24h|48h|7d] — xuất CSV bài báo gần đây."""
+    import csv
+    import io
+    from app.db import AsyncSessionLocal
+    from app.db.models import ArticleMeta, Company
+    from sqlalchemy import select
+
+    hours = _parse_hours(ctx.args[0] if ctx.args else None) if ctx.args else 48
+
+    wait_msg = await update.message.reply_text(
+        f"⏳ Đang xuất dữ liệu {hours}h qua...", parse_mode=ParseMode.HTML
+    )
+
+    since = datetime.now(timezone.utc) - timedelta(hours=hours)
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            select(ArticleMeta, Company)
+            .join(Company, ArticleMeta.company_id == Company.id)
+            .where(ArticleMeta.published_at >= since)
+            .order_by(ArticleMeta.published_at.desc())
+        )
+        rows = result.fetchall()
+
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(["ticker", "company", "sentiment", "score", "published_at", "title", "url"])
+    for art, company in rows:
+        writer.writerow([
+            company.ticker,
+            company.name,
+            art.sentiment or "",
+            f"{(art.sentiment_score or 0):.2f}",
+            art.published_at.strftime("%Y-%m-%d %H:%M UTC"),
+            art.title,
+            art.url,
+        ])
+
+    label_range = f"{hours}h" if hours < 48 else f"{hours // 24} ngày"
+    csv_bytes = output.getvalue().encode("utf-8-sig")  # BOM để Excel đọc được tiếng Việt
+    filename = f"the-eye-{datetime.now().strftime('%Y%m%d-%H%M')}.csv"
+
+    await wait_msg.delete()
+    await update.message.reply_document(
+        document=io.BytesIO(csv_bytes),
+        filename=filename,
+        caption=f"📊 <b>{len(rows)} bài</b> trong {label_range} qua",
+        parse_mode=ParseMode.HTML,
+    )
+    log.info(f"[bot] /export {hours}h → {len(rows)} articles → {filename}")
+
+
+async def cmd_watch(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+    """/watch TICKER — thêm ticker vào danh sách nhận Heading News."""
+    if not ctx.args:
+        await update.message.reply_text(
+            "⚠️ Thiếu ticker. Ví dụ: <code>/watch VIC</code>",
+            parse_mode=ParseMode.HTML,
+        )
+        return
+    ticker = _normalize_ticker(ctx.args[0])
+    add_ticker(ticker)
+    watchlist = get_watchlist()
+    tickers_str = " · ".join(f"<b>{t}</b>" for t in watchlist) if watchlist else "—"
+    await update.message.reply_text(
+        f"✅ Đã thêm <b>{ticker}</b> vào danh sách Heading News.\n"
+        f"📋 Đang theo dõi: {tickers_str}",
+        parse_mode=ParseMode.HTML,
+    )
+
+
+async def cmd_unwatch(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+    """/unwatch TICKER — xóa ticker khỏi danh sách Heading News."""
+    if not ctx.args:
+        await update.message.reply_text(
+            "⚠️ Thiếu ticker. Ví dụ: <code>/unwatch VIC</code>",
+            parse_mode=ParseMode.HTML,
+        )
+        return
+    ticker = _normalize_ticker(ctx.args[0])
+    removed = remove_ticker(ticker)
+    if not removed:
+        watchlist = get_watchlist()
+        if watchlist is None:
+            msg = (
+                f"ℹ️ <b>{ticker}</b> không nằm trong danh sách cụ thể "
+                f"(hiện đang nhận Heading News từ <b>TẤT CẢ</b> ticker).\n"
+                f"Dùng <code>/watch TICKER</code> để chuyển sang chế độ lọc."
+            )
+        else:
+            msg = f"⚠️ <b>{ticker}</b> không có trong danh sách."
+        await update.message.reply_text(msg, parse_mode=ParseMode.HTML)
+        return
+
+    watchlist = get_watchlist()
+    if watchlist:
+        tickers_str = " · ".join(f"<b>{t}</b>" for t in watchlist)
+        msg = f"✅ Đã xóa <b>{ticker}</b>.\n📋 Còn lại: {tickers_str}"
+    else:
+        msg = (
+            f"✅ Đã xóa <b>{ticker}</b>.\n"
+            f"⚠️ Danh sách trống — <b>không có ticker nào</b> nhận Heading News.\n"
+            f"Dùng <code>/watchall</code> để nhận từ tất cả."
+        )
+    await update.message.reply_text(msg, parse_mode=ParseMode.HTML)
+
+
+async def cmd_watchall(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+    """/watchall — nhận Heading News từ tất cả ticker (reset về mặc định)."""
+    reset_to_all()
+    await update.message.reply_text(
+        "✅ Đã reset: nhận <b>Heading News từ TẤT CẢ ticker</b>.",
+        parse_mode=ParseMode.HTML,
+    )
+
+
+async def cmd_watching(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+    """/watching — xem cấu hình Heading News hiện tại."""
+    watchlist = get_watchlist()
+    if watchlist is None:
+        text = (
+            "🔔 <b>HEADING NEWS — Cấu hình hiện tại</b>\n\n"
+            "Chế độ: <b>TẤT CẢ ticker</b>\n"
+            "<i>Nhận ngay khi bất kỳ công ty nào có tin POS/NEG.</i>\n\n"
+            "Lệnh:\n"
+            "  <code>/watch TICKER</code>   — chỉ theo dõi ticker cụ thể\n"
+            "  <code>/unwatch TICKER</code> — bỏ theo dõi\n"
+            "  <code>/watchall</code>       — quay lại chế độ tất cả"
+        )
+    elif not watchlist:
+        text = (
+            "🔕 <b>HEADING NEWS — Cấu hình hiện tại</b>\n\n"
+            "Chế độ: <b>TẮT</b> (danh sách trống)\n"
+            "<i>Không có ticker nào nhận Heading News tức thì.</i>\n\n"
+            "Dùng <code>/watch TICKER</code> để thêm hoặc <code>/watchall</code> để nhận tất cả."
+        )
+    else:
+        tickers_str = "\n".join(f"  • <b>{t}</b>" for t in watchlist)
+        text = (
+            f"🔔 <b>HEADING NEWS — Cấu hình hiện tại</b>\n\n"
+            f"Chế độ: <b>Lọc theo ticker</b>\n"
+            f"{tickers_str}\n\n"
+            f"Lệnh:\n"
+            f"  <code>/watch TICKER</code>   — thêm ticker\n"
+            f"  <code>/unwatch TICKER</code> — bỏ ticker\n"
+            f"  <code>/watchall</code>       — nhận từ tất cả"
+        )
+    await update.message.reply_text(text, parse_mode=ParseMode.HTML)
+
+
 async def cmd_unknown(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
     """Xử lý lệnh không biết."""
     await update.message.reply_text(
@@ -260,13 +495,20 @@ def build_application() -> Application:
     """Tạo Telegram Application với đầy đủ handlers."""
     app = Application.builder().token(BOT_TOKEN).build()
 
-    app.add_handler(CommandHandler("start",  cmd_help))
-    app.add_handler(CommandHandler("help",   cmd_help))
-    app.add_handler(CommandHandler("report", cmd_report))
-    app.add_handler(CommandHandler("all",    cmd_all))
-    app.add_handler(CommandHandler("status", cmd_status))
-    app.add_handler(CommandHandler("top",    cmd_top))
-    app.add_handler(CommandHandler("list",   cmd_list))
+    app.add_handler(CommandHandler("start",    cmd_help))
+    app.add_handler(CommandHandler("help",     cmd_help))
+    app.add_handler(CommandHandler("report",   cmd_report))
+    app.add_handler(CommandHandler("all",      cmd_all))
+    app.add_handler(CommandHandler("status",   cmd_status))
+    app.add_handler(CommandHandler("top",      cmd_top))
+    app.add_handler(CommandHandler("list",     cmd_list))
+    app.add_handler(CommandHandler("search",   cmd_search))
+    app.add_handler(CommandHandler("ping",     cmd_ping))
+    app.add_handler(CommandHandler("export",   cmd_export))
+    app.add_handler(CommandHandler("watch",    cmd_watch))
+    app.add_handler(CommandHandler("unwatch",  cmd_unwatch))
+    app.add_handler(CommandHandler("watchall", cmd_watchall))
+    app.add_handler(CommandHandler("watching", cmd_watching))
 
     return app
 
@@ -274,12 +516,19 @@ def build_application() -> Application:
 async def set_bot_commands(application: Application) -> None:
     """Đăng ký danh sách lệnh hiện trên Telegram UI."""
     commands = [
-        BotCommand("report", "Báo cáo công ty: /report VIC [24h|48h|7d]"),
-        BotCommand("all",    "Tổng quan tất cả: /all [24h|48h|7d]"),
-        BotCommand("top",    "Top tin POS/NEG: /top pos|neg [7d]"),
-        BotCommand("list",   "Danh sách công ty đang theo dõi"),
-        BotCommand("status", "Trạng thái hệ thống"),
-        BotCommand("help",   "Hướng dẫn sử dụng"),
+        BotCommand("report",   "Báo cáo công ty: /report VIC [24h|48h|7d]"),
+        BotCommand("all",      "Tổng quan tất cả: /all [24h|48h|7d]"),
+        BotCommand("top",      "Top tin POS/NEG: /top pos|neg [7d]"),
+        BotCommand("search",   "Tìm bài: /search từ khóa [7d]"),
+        BotCommand("list",     "Danh sách công ty đang theo dõi"),
+        BotCommand("export",   "Xuất CSV: /export [24h|48h|7d]"),
+        BotCommand("ping",     "Kiểm tra RSS feeds"),
+        BotCommand("watching", "Xem cấu hình Heading News"),
+        BotCommand("watch",    "Bật Heading News: /watch VIC"),
+        BotCommand("unwatch",  "Tắt Heading News: /unwatch VIC"),
+        BotCommand("watchall", "Nhận Heading News từ tất cả ticker"),
+        BotCommand("status",   "Trạng thái hệ thống"),
+        BotCommand("help",     "Hướng dẫn sử dụng"),
     ]
     await application.bot.set_my_commands(commands)
     log.info("[bot] Commands registered on Telegram")

@@ -2,6 +2,7 @@
 Report builder — tạo báo cáo doanh nghiệp từ DB.
 Dùng chung cho bot commands và digest.
 """
+import html as html_lib
 from datetime import datetime, timedelta, timezone
 from sqlalchemy import select, func
 from app.db import AsyncSessionLocal
@@ -137,40 +138,40 @@ async def build_company_report(ticker: str, hours: int = 24) -> str:
         mood = "⚪ <b>Không có tín hiệu rõ</b>"
     lines.append(mood)
 
+    # Theo dõi id đã hiện để dedup giữa các section
+    shown_ids: set[int] = set()
+
+    def _article_line(art, src, emoji: str, show_score: bool = True) -> str:
+        src_name = html_lib.escape(src.name.split(" - ")[-1] if src else "")
+        raw = art.title[:80] + "…" if len(art.title) > 80 else art.title
+        title = html_lib.escape(raw)
+        score_part = f" [{_pct(art.sentiment_score)}]" if show_score else ""
+        return (
+            f"  {emoji}{score_part} "
+            f"<a href='{html_lib.escape(art.url)}'>{title}</a>\n"
+            f"       <i>{_pub(art.published_at)}  {src_name}</i>"
+        )
+
     # Top POS
     if pos_rows:
         lines.append("\n📈 <b>TIN TÍCH CỰC:</b>")
         for art, src in pos_rows:
-            src_name = (src.name.split(" - ")[-1] if src else "")
-            title = art.title[:80] + "…" if len(art.title) > 80 else art.title
-            lines.append(
-                f"  🟢 [{_pct(art.sentiment_score)}] "
-                f"<a href='{art.url}'>{title}</a>\n"
-                f"       <i>{_pub(art.published_at)}  {src_name}</i>"
-            )
+            shown_ids.add(art.id)
+            lines.append(_article_line(art, src, "🟢"))
 
     # Top NEG
     if neg_rows:
         lines.append("\n📉 <b>TIN TIÊU CỰC:</b>")
         for art, src in neg_rows:
-            src_name = (src.name.split(" - ")[-1] if src else "")
-            title = art.title[:80] + "…" if len(art.title) > 80 else art.title
-            lines.append(
-                f"  🔴 [{_pct(art.sentiment_score)}] "
-                f"<a href='{art.url}'>{title}</a>\n"
-                f"       <i>{_pub(art.published_at)}  {src_name}</i>"
-            )
+            shown_ids.add(art.id)
+            lines.append(_article_line(art, src, "🔴"))
 
-    # Top NEU (chỉ hiện nếu không có POS/NEG)
-    if not pos_rows and not neg_rows and neu_rows:
-        lines.append("\n📋 <b>TIN MỚI NHẤT:</b>")
-        for art, src in neu_rows:
-            src_name = (src.name.split(" - ")[-1] if src else "")
-            title = art.title[:80] + "…" if len(art.title) > 80 else art.title
-            lines.append(
-                f"  ⚪ <a href='{art.url}'>{title}</a>\n"
-                f"       <i>{_pub(art.published_at)}  {src_name}</i>"
-            )
+    # NEU — luôn hiện, bỏ qua bài đã có trong POS/NEG (dedup)
+    neu_filtered = [(art, src) for art, src in neu_rows if art.id not in shown_ids]
+    if neu_filtered:
+        lines.append("\n📋 <b>TIN TRUNG LẬP:</b>")
+        for art, src in neu_filtered:
+            lines.append(_article_line(art, src, "⚪", show_score=False))
 
     lines.append("\n─────────────────────────")
     lines.append(f"<i>👁 The-Eye  •  /report {company.ticker} [24h|48h|7d]</i>")
@@ -237,6 +238,50 @@ async def build_overview_report(hours: int = 24) -> str:
     return "\n".join(lines)
 
 
+async def search_articles(keyword: str, hours: int = 48, limit: int = 8) -> str:
+    """Tìm kiếm bài báo theo từ khóa trong title hoặc summary."""
+    since = datetime.now(timezone.utc) - timedelta(hours=hours)
+    label_range = f"{hours}h" if hours < 48 else f"{hours // 24} ngày"
+    kw = f"%{keyword}%"
+
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            select(ArticleMeta, Company)
+            .join(Company, ArticleMeta.company_id == Company.id)
+            .where(
+                (ArticleMeta.title.ilike(kw)) | (ArticleMeta.summary.ilike(kw))
+            )
+            .where(ArticleMeta.published_at >= since)
+            .order_by(ArticleMeta.published_at.desc())
+            .limit(limit)
+        )
+        rows = result.fetchall()
+
+    kw_escaped = html_lib.escape(keyword)
+    if not rows:
+        return (
+            f"🔍 Không tìm thấy bài nào chứa «<b>{kw_escaped}</b>» "
+            f"trong {label_range} qua."
+        )
+
+    lines = [
+        f"🔍 <b>KẾT QUẢ: «{kw_escaped}»</b>",
+        f"<i>{len(rows)} bài trong {label_range} qua</i>",
+        "─────────────────────────",
+    ]
+    for art, company in rows:
+        emoji = SENTIMENT_ICON.get(art.sentiment, "⚪")
+        raw = art.title[:80] + "…" if len(art.title) > 80 else art.title
+        title = html_lib.escape(raw)
+        lines.append(
+            f"{emoji} <b>[{company.ticker}]</b> {_pub(art.published_at)}\n"
+            f"  <a href='{html_lib.escape(art.url)}'>{title}</a>"
+        )
+
+    lines.append(f"\n<i>👁 /search {html_lib.escape(keyword)} [24h|48h|7d]</i>")
+    return "\n".join(lines)
+
+
 async def build_top_report(sentiment: str, hours: int = 24, limit: int = 5) -> str:
     """Top POS hoặc NEG across tất cả công ty."""
     since = datetime.now(timezone.utc) - timedelta(hours=hours)
@@ -266,11 +311,12 @@ async def build_top_report(sentiment: str, hours: int = 24, limit: int = 5) -> s
         "─────────────────────────",
     ]
     for i, (art, company, src) in enumerate(rows, 1):
-        src_name = (src.name.split(" - ")[-1] if src else "")
-        title = art.title[:80] + "…" if len(art.title) > 80 else art.title
+        src_name = html_lib.escape(src.name.split(" - ")[-1] if src else "")
+        raw = art.title[:80] + "…" if len(art.title) > 80 else art.title
+        title = html_lib.escape(raw)
         lines.append(
             f"{i}. <b>[{company.ticker}]</b> {icon} {_pct(art.sentiment_score)}\n"
-            f"   <a href='{art.url}'>{title}</a>\n"
+            f"   <a href='{html_lib.escape(art.url)}'>{title}</a>\n"
             f"   <i>{_pub(art.published_at)}  {src_name}</i>"
         )
 

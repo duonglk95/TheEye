@@ -1,8 +1,8 @@
 # Sentiment classification config
 # Cập nhật version và model_path sau mỗi lần train PhoBERT (Phase 2)
 
-version: "rule_v1"
-updated_at: "2026-05-30"
+version: "rule_v2"
+updated_at: "2026-05-31"
 
 # Sau Phase 2, điền đường dẫn model vào đây để tự động dùng PhoBERT
 model_path: null
@@ -12,20 +12,50 @@ model_path: null
 phobert_confidence_threshold: 0.75
 
 # ----------------------------------------------------------------
-# Rule-based classification (Phase 1 — trước khi có PhoBERT)
+# Negation words — nếu xuất hiện trước keyword POS → huỷ/giảm điểm
+# ----------------------------------------------------------------
+negation:
+  words:
+    - "không"
+    - "chưa"
+    - "chẳng"
+    - "chưa thể"
+    - "không thể"
+    - "khó"
+    - "thiếu"
+    - "vẫn chưa"
+    - "chưa đạt"
+    - "chưa đạt được"
+    - "không đạt"
+    - "chưa hoàn thành"
+    - "chưa có"
+    - "khó có thể"
+    - "không có"
+
+# ----------------------------------------------------------------
+# Rule-based classification
 # ----------------------------------------------------------------
 
 positive:
-  strong:   # Chắc chắn POS, weight cao
+  strong:   # Chắc chắn POS, weight 1.0
     - "lợi nhuận tăng"
     - "doanh thu tăng"
     - "kỷ lục doanh thu"
     - "kỷ lục lợi nhuận"
+    - "lãi kỷ lục"
+    - "lãi ròng tăng"
+    - "tăng trưởng mạnh"
+    - "tăng trưởng vượt bậc"
     - "ký kết hợp đồng"
     - "hợp tác chiến lược"
     - "mở rộng thị trường"
-    - "tăng trưởng mạnh"
     - "vượt kế hoạch"
+    - "vượt mục tiêu"
+    - "vượt chỉ tiêu"
+    - "hoàn thành kế hoạch"
+    - "đạt kế hoạch"
+    - "đột biến lợi nhuận"
+    - "lợi nhuận đột biến"
     - "phát hành thành công"
     - "cổ tức cao"
     - "niêm yết thêm"
@@ -35,7 +65,16 @@ positive:
     - "xếp hạng tăng"
     - "lên sàn"
     - "thặng dư vốn"
-  weak:     # Có thể POS, cần context
+    - "kết quả ấn tượng"
+    - "tăng mạnh"
+    - "xuất khẩu tăng"
+    - "tăng vốn thành công"
+    - "lợi nhuận khả quan"
+    - "kết quả tích cực"
+    - "đạt lợi nhuận"
+    - "kinh doanh có lãi"
+    - "lãi đậm"
+  weak:     # Có thể POS, weight 0.4
     - "tăng vốn"
     - "phát hành cổ phiếu"
     - "M&A"
@@ -43,30 +82,58 @@ positive:
     - "đầu tư mở rộng"
     - "triển vọng tích cực"
     - "kế hoạch tăng trưởng"
+    - "triển vọng"
+    - "kỳ vọng tích cực"
+    - "tín hiệu tốt"
+    - "phục hồi"
+    - "tăng nhẹ"
+    - "lạc quan"
+    - "tích cực"
+    - "khởi sắc"
+    - "cải thiện"
+    - "tăng trưởng"
+    - "tốt hơn kỳ vọng"
 
 negative:
-  strong:   # Chắc chắn NEG, weight cao
+  strong:   # Chắc chắn NEG, weight 1.0
     - "thua lỗ"
     - "lỗ ròng"
+    - "lỗ nặng"
+    - "lỗ lớn"
     - "lợi nhuận giảm"
     - "doanh thu giảm"
+    - "sụt giảm mạnh"
     - "khởi tố"
     - "bị phạt"
     - "điều tra"
     - "vi phạm"
     - "hủy niêm yết"
     - "đình chỉ giao dịch"
+    - "đình chỉ hoạt động"
     - "nợ xấu"
+    - "nợ quá hạn"
     - "mất khả năng thanh toán"
     - "phá sản"
     - "giải thể"
     - "thu hồi giấy phép"
+    - "bị thu hồi"
     - "bị kiện"
+    - "thua kiện"
     - "tranh chấp pháp lý"
     - "cắt giảm nhân sự"
     - "đóng cửa nhà máy"
     - "thu hồi sản phẩm"
-  weak:     # Có thể NEG, cần context
+    - "âm vốn"
+    - "bị cưỡng chế"
+    - "hủy hợp đồng"
+    - "thanh lý"
+    - "kiểm toán từ chối"
+    - "ý kiến kiểm toán ngoại trừ"
+    - "chậm nộp thuế"
+    - "trốn thuế"
+    - "gian lận"
+    - "tăng trưởng âm"
+  weak:     # Có thể NEG, weight 0.4
     - "giảm vốn"
     - "thoái vốn"
     - "chậm tiến độ"
@@ -75,6 +142,14 @@ negative:
     - "rủi ro"
     - "thách thức"
     - "áp lực"
+    - "sụt giảm"
+    - "giảm sút"
+    - "kém khả quan"
+    - "dưới kỳ vọng"
+    - "chưa đạt kế hoạch"
+    - "điều chỉnh giảm"
+    - "lợi nhuận thấp"
+    - "khó khăn"
 
 neutral:
   indicators:   # Tin thông báo/hành chính → NEU
@@ -90,10 +165,13 @@ neutral:
     - "chốt danh sách"
     - "thay đổi điều lệ"
     - "phát hành quyền mua"
+    - "thông báo"
+    - "công bố"
+    - "họp hội đồng quản trị"
+    - "phê duyệt phương án"
 
 # ----------------------------------------------------------------
 # Training categories cho Phase 2
-# Mỗi bài báo được gán 1 trong các categories này
 # ----------------------------------------------------------------
 training_categories:
   - id: chung_khoan

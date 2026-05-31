@@ -1,6 +1,9 @@
 """
 Rule-based classifier — đọc rules từ sentiment.yaml, không cần GPU.
 Trả về (label, score, method).
+
+Negation: nếu "không/chưa/khó..." xuất hiện trong 60 ký tự trước keyword POS
+→ điểm POS bị huỷ, thay bằng tín hiệu NEG nhẹ (0.3).
 """
 import re
 from app.config import load_sentiment
@@ -26,6 +29,20 @@ def _normalize(text: str) -> str:
     return re.sub(r"\s+", " ", text.lower()).strip()
 
 
+def _has_negation_before(text: str, keyword: str, negation_words: list[str], window: int = 60) -> bool:
+    """Trả về True nếu có từ phủ định trong `window` ký tự trước keyword."""
+    pos = 0
+    while True:
+        idx = text.find(keyword, pos)
+        if idx == -1:
+            break
+        context = text[max(0, idx - window):idx]
+        if any(neg in context for neg in negation_words):
+            return True
+        pos = idx + 1
+    return False
+
+
 def classify(title: str, summary: str | None = None) -> tuple[str, float, str]:
     """
     Classify text theo rules.
@@ -34,7 +51,7 @@ def classify(title: str, summary: str | None = None) -> tuple[str, float, str]:
       score: 0.0 – 1.0
     """
     rules = _get_rules()
-    version = rules.get("version", "rule_v1")
+    version = rules.get("version", "rule_v2")
     text = _normalize(f"{title} {summary or ''}")
 
     pos_strong = rules.get("positive", {}).get("strong", [])
@@ -42,17 +59,26 @@ def classify(title: str, summary: str | None = None) -> tuple[str, float, str]:
     neg_strong = rules.get("negative", {}).get("strong", [])
     neg_weak   = rules.get("negative", {}).get("weak", [])
     neu_ind    = rules.get("neutral", {}).get("indicators", [])
+    neg_words  = rules.get("negation", {}).get("words", [])
 
     pos_score = 0.0
     neg_score = 0.0
 
     for kw in pos_strong:
-        if _normalize(kw) in text:
-            pos_score += 1.0
+        kw_norm = _normalize(kw)
+        if kw_norm in text:
+            if _has_negation_before(text, kw_norm, neg_words):
+                neg_score += 0.3  # phủ định positive → tín hiệu tiêu cực nhẹ
+            else:
+                pos_score += 1.0
 
     for kw in pos_weak:
-        if _normalize(kw) in text:
-            pos_score += 0.4
+        kw_norm = _normalize(kw)
+        if kw_norm in text:
+            if _has_negation_before(text, kw_norm, neg_words):
+                pass  # phủ định weak positive → bỏ qua
+            else:
+                pos_score += 0.4
 
     for kw in neg_strong:
         if _normalize(kw) in text:
