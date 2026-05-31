@@ -8,6 +8,7 @@ Danh sách lệnh:
   /list                          — Danh sách công ty đang monitor
   /status                        — Trạng thái hệ thống
   /help                          — Hướng dẫn sử dụng
+  /clear [N]                     — Xóa N tin nhắn gần đây (mặc định 50)
 
 Setup group:
   1. Thêm bot vào group
@@ -15,6 +16,7 @@ Setup group:
   3. Bật "Group Privacy" = OFF trong BotFather
      (hoặc dùng /command@YourBotName trong group)
 """
+import asyncio
 import io
 import logging
 import os
@@ -100,7 +102,8 @@ async def cmd_help(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
         "  /watchall — Nhận từ tất cả ticker\n\n"
         "<b>⚙️ Hệ thống:</b>\n"
         "  /ping — Kiểm tra RSS feeds\n"
-        "  /status — Trạng thái hệ thống\n\n"
+        "  /status — Trạng thái hệ thống\n"
+        "  /clear <i>[N]</i> — Xóa N tin nhắn gần đây (mặc định 50)\n\n"
         "<b>Ví dụ:</b>\n"
         "  <code>/report SBT 48h</code>\n"
         "  <code>/search lợi nhuận giảm 7d</code>\n"
@@ -255,7 +258,7 @@ async def cmd_status(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
         f"    🔴 NEG    : <b>{neg}</b>\n"
         f"    ⚪ NEU    : {neu}\n\n"
         f"  🕐 Poll cuối : {last_fetch}\n\n"
-        f"<i>👁 The-Eye — News Intelligence</i>"
+        f"<i>👁 The-Eye by dlk — News Intelligence</i>"
     )
     await update.message.reply_text(text, parse_mode=ParseMode.HTML)
 
@@ -481,6 +484,42 @@ async def cmd_watching(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
     await update.message.reply_text(text, parse_mode=ParseMode.HTML)
 
 
+async def cmd_clear(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+    """/clear [N] — xóa N tin nhắn gần đây trong chat (mặc định 50, tối đa 200)."""
+    args = ctx.args
+    try:
+        limit = min(int(args[0]), 200) if args else 50
+    except (ValueError, IndexError):
+        limit = 50
+
+    chat_id = update.effective_chat.id
+    current_msg_id = update.message.message_id
+
+    try:
+        await update.message.delete()
+    except Exception:
+        pass
+
+    deleted = 0
+    for msg_id in range(current_msg_id - 1, max(0, current_msg_id - limit - 1), -1):
+        try:
+            await ctx.bot.delete_message(chat_id=chat_id, message_id=msg_id)
+            deleted += 1
+        except Exception:
+            pass
+
+    confirm = await ctx.bot.send_message(
+        chat_id=chat_id,
+        text=f"🗑 Đã xóa <b>{deleted}</b> tin nhắn.",
+        parse_mode=ParseMode.HTML,
+    )
+    await asyncio.sleep(3)
+    try:
+        await confirm.delete()
+    except Exception:
+        pass
+
+
 async def cmd_unknown(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
     """Xử lý lệnh không biết."""
     await update.message.reply_text(
@@ -509,6 +548,7 @@ def build_application() -> Application:
     app.add_handler(CommandHandler("unwatch",  cmd_unwatch))
     app.add_handler(CommandHandler("watchall", cmd_watchall))
     app.add_handler(CommandHandler("watching", cmd_watching))
+    app.add_handler(CommandHandler("clear",    cmd_clear))
 
     return app
 
@@ -528,6 +568,7 @@ async def set_bot_commands(application: Application) -> None:
         BotCommand("unwatch",  "Tắt Heading News: /unwatch VIC"),
         BotCommand("watchall", "Nhận Heading News từ tất cả ticker"),
         BotCommand("status",   "Trạng thái hệ thống"),
+        BotCommand("clear",    "Xóa tin nhắn gần đây: /clear [N]"),
         BotCommand("help",     "Hướng dẫn sử dụng"),
     ]
     await application.bot.set_my_commands(commands)

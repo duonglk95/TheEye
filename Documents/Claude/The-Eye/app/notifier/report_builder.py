@@ -174,7 +174,7 @@ async def build_company_report(ticker: str, hours: int = 24) -> str:
             lines.append(_article_line(art, src, "⚪", show_score=False))
 
     lines.append("\n─────────────────────────")
-    lines.append(f"<i>👁 The-Eye  •  /report {company.ticker} [24h|48h|7d]</i>")
+    lines.append(f"<i>👁 The-Eye by dlk  •  /report {company.ticker} [24h|48h|7d]</i>")
 
     return "\n".join(lines)
 
@@ -320,5 +320,5 @@ async def build_top_report(sentiment: str, hours: int = 24, limit: int = 5) -> s
             f"   <i>{_pub(art.published_at)}  {src_name}</i>"
         )
 
-    lines.append(f"\n<i>👁 The-Eye  •  /top pos | /top neg</i>")
+    lines.append(f"\n<i>👁 The-Eye by dlk  •  /top pos | /top neg</i>")
     return "\n".join(lines)
