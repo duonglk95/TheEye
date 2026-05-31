@@ -1,0 +1,14 @@
+.env
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+.venv/
+venv/
+models/
+*.pth
+*.bin
+training/datasets/
+training/outputs/
+*.log
+.DS_Store

@@ -1,0 +1,129 @@
+# Sentiment classification config
+# Cập nhật version và model_path sau mỗi lần train PhoBERT (Phase 2)
+
+version: "rule_v1"
+updated_at: "2026-05-30"
+
+# Sau Phase 2, điền đường dẫn model vào đây để tự động dùng PhoBERT
+model_path: null
+# model_path: "models/phobert_v1.pth"
+
+# Ngưỡng confidence để dùng PhoBERT (nếu thấp hơn → fallback sang rule)
+phobert_confidence_threshold: 0.75
+
+# ----------------------------------------------------------------
+# Rule-based classification (Phase 1 — trước khi có PhoBERT)
+# ----------------------------------------------------------------
+
+positive:
+  strong:   # Chắc chắn POS, weight cao
+    - "lợi nhuận tăng"
+    - "doanh thu tăng"
+    - "kỷ lục doanh thu"
+    - "kỷ lục lợi nhuận"
+    - "ký kết hợp đồng"
+    - "hợp tác chiến lược"
+    - "mở rộng thị trường"
+    - "tăng trưởng mạnh"
+    - "vượt kế hoạch"
+    - "phát hành thành công"
+    - "cổ tức cao"
+    - "niêm yết thêm"
+    - "IPO thành công"
+    - "trúng thầu"
+    - "nhận giải thưởng"
+    - "xếp hạng tăng"
+    - "lên sàn"
+    - "thặng dư vốn"
+  weak:     # Có thể POS, cần context
+    - "tăng vốn"
+    - "phát hành cổ phiếu"
+    - "M&A"
+    - "mua lại"
+    - "đầu tư mở rộng"
+    - "triển vọng tích cực"
+    - "kế hoạch tăng trưởng"
+
+negative:
+  strong:   # Chắc chắn NEG, weight cao
+    - "thua lỗ"
+    - "lỗ ròng"
+    - "lợi nhuận giảm"
+    - "doanh thu giảm"
+    - "khởi tố"
+    - "bị phạt"
+    - "điều tra"
+    - "vi phạm"
+    - "hủy niêm yết"
+    - "đình chỉ giao dịch"
+    - "nợ xấu"
+    - "mất khả năng thanh toán"
+    - "phá sản"
+    - "giải thể"
+    - "thu hồi giấy phép"
+    - "bị kiện"
+    - "tranh chấp pháp lý"
+    - "cắt giảm nhân sự"
+    - "đóng cửa nhà máy"
+    - "thu hồi sản phẩm"
+  weak:     # Có thể NEG, cần context
+    - "giảm vốn"
+    - "thoái vốn"
+    - "chậm tiến độ"
+    - "dưới kế hoạch"
+    - "cảnh báo"
+    - "rủi ro"
+    - "thách thức"
+    - "áp lực"
+
+neutral:
+  indicators:   # Tin thông báo/hành chính → NEU
+    - "họp ĐHCĐ"
+    - "Đại hội đồng cổ đông"
+    - "thông báo giao dịch"
+    - "bổ nhiệm"
+    - "miễn nhiệm"
+    - "thay đổi nhân sự"
+    - "công bố báo cáo tài chính"
+    - "kết quả kinh doanh quý"
+    - "chia cổ tức"
+    - "chốt danh sách"
+    - "thay đổi điều lệ"
+    - "phát hành quyền mua"
+
+# ----------------------------------------------------------------
+# Training categories cho Phase 2
+# Mỗi bài báo được gán 1 trong các categories này
+# ----------------------------------------------------------------
+training_categories:
+  - id: chung_khoan
+    name: "Chứng khoán"
+    description: "Tin giao dịch, biến động giá, thị trường"
+
+  - id: bao_cao_tai_chinh
+    name: "Báo cáo tài chính"
+    description: "KQKD, BCTC, doanh thu, lợi nhuận"
+
+  - id: hoat_dong_su_kien
+    name: "Hoạt động & Sự kiện"
+    description: "Ký kết, ra mắt, khai trương, hội nghị"
+
+  - id: nhan_su
+    name: "Nhân sự"
+    description: "Bổ nhiệm, miễn nhiệm, thay đổi lãnh đạo"
+
+  - id: phap_ly
+    name: "Pháp lý & Quản trị"
+    description: "Điều tra, khởi tố, vi phạm, phán quyết"
+
+  - id: chien_luoc
+    name: "Chiến lược & Đầu tư"
+    description: "M&A, mở rộng, IPO, thoái vốn, liên kết"
+
+  - id: san_xuat_kinh_doanh
+    name: "Sản xuất & Kinh doanh"
+    description: "Hoạt động vận hành, đơn hàng, hợp đồng"
+
+  - id: vi_mo
+    name: "Vĩ mô & Ngành"
+    description: "Tin ngành, chính sách ảnh hưởng gián tiếp"

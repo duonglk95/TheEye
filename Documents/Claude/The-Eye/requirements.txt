@@ -1,0 +1,37 @@
+# Core
+python-dotenv==1.0.1
+pyyaml==6.0.2
+
+# Database
+sqlalchemy==2.0.36
+asyncpg==0.30.0
+alembic==1.14.0
+
+# HTTP & RSS
+httpx==0.28.1
+feedparser==6.0.11
+beautifulsoup4==4.12.3
+lxml==5.3.0
+
+# Scheduling
+apscheduler==3.10.4
+
+# NLP (Phase 1 — rule-based, nhẹ)
+underthesea==6.8.4
+
+# Notification
+python-telegram-bot==21.9
+
+# TUI
+textual==0.89.1
+
+# --- Phase 2 (cài thêm khi training, không cần trên Railway) ---
+# anthropic==0.40.0     ← Claude Haiku auto-labeling
+# transformers==4.46.3
+# torch==2.5.1
+# datasets==3.2.0
+# scikit-learn==1.5.2
+# pandas==2.2.3
+
+# --- Phase 3 ---
+# vnstock==3.0.9

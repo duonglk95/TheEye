@@ -1,0 +1,123 @@
+defaults:
+  poll_interval_sec: 300      # 5 phút
+  timeout_sec: 15
+  max_items_per_fetch: 50
+
+feeds:
+  # === Vietstock — tài chính, chứng khoán chuyên sâu ===
+  - id: vietstock_doanh_nghiep
+    name: "Vietstock - Hoạt động kinh doanh"
+    url: "https://vietstock.vn/737/doanh-nghiep/hoat-dong-kinh-doanh.rss"
+    type: rss
+    priority: high
+    active: true
+    categories: [doanh_nghiep, hoat_dong]
+
+  - id: vietstock_co_phieu
+    name: "Vietstock - Cổ phiếu"
+    url: "https://vietstock.vn/830/chung-khoan/co-phieu.rss"
+    type: rss
+    priority: high
+    active: true
+    categories: [chung_khoan, co_phieu]
+
+  - id: vietstock_giao_dich_noi_bo
+    name: "Vietstock - Giao dịch nội bộ"
+    url: "https://vietstock.vn/739/chung-khoan/giao-dich-noi-bo.rss"
+    type: rss
+    priority: high
+    active: true
+    categories: [chung_khoan, giao_dich_noi_bo]
+
+  - id: vietstock_tang_von_ma
+    name: "Vietstock - Tăng vốn M&A"
+    url: "https://vietstock.vn/764/doanh-nghiep/tang-von-m-a.rss"
+    type: rss
+    priority: medium
+    active: true
+    categories: [doanh_nghiep, ma]
+
+  - id: vietstock_co_tuc
+    name: "Vietstock - Cổ tức"
+    url: "https://vietstock.vn/738/doanh-nghiep/co-tuc.rss"
+    type: rss
+    priority: medium
+    active: true
+    categories: [doanh_nghiep, co_tuc]
+
+  - id: vietstock_niem_yet
+    name: "Vietstock - Niêm yết"
+    url: "https://vietstock.vn/741/chung-khoan/niem-yet.rss"
+    type: rss
+    priority: medium
+    active: true
+    categories: [chung_khoan, niem_yet]
+
+  - id: vietstock_phan_tich_co_ban
+    name: "Vietstock - Phân tích cơ bản"
+    url: "https://vietstock.vn/582/nhan-dinh-phan-tich/phan-tich-co-ban.rss"
+    type: rss
+    priority: medium
+    active: true
+    categories: [phan_tich]
+
+  # === CafeF — tin doanh nghiệp rộng ===
+  - id: cafef_doanh_nghiep
+    name: "CafeF - Doanh nghiệp"
+    url: "https://cafef.vn/doanh-nghiep.rss"
+    type: rss
+    priority: high
+    active: true
+    categories: [doanh_nghiep]
+
+  - id: cafef_chung_khoan
+    name: "CafeF - Thị trường chứng khoán"
+    url: "https://cafef.vn/thi-truong-chung-khoan.rss"
+    type: rss
+    priority: high
+    active: true
+    categories: [chung_khoan]
+
+  - id: cafef_tai_chinh_ngan_hang
+    name: "CafeF - Tài chính Ngân hàng"
+    url: "https://cafef.vn/tai-chinh-ngan-hang.rss"
+    type: rss
+    priority: medium
+    active: true
+    categories: [tai_chinh]
+
+  - id: cafef_vi_mo
+    name: "CafeF - Vĩ mô Đầu tư"
+    url: "https://cafef.vn/vi-mo-dau-tu.rss"
+    type: rss
+    priority: low
+    active: true
+    categories: [vi_mo]
+
+  # === VnExpress — tin lớn, phổ thông ===
+  - id: vnexpress_kinh_doanh
+    name: "VnExpress - Kinh doanh"
+    url: "https://vnexpress.net/rss/kinh-doanh.rss"
+    type: rss
+    priority: medium
+    active: true
+    categories: [kinh_doanh]
+
+  - id: vnexpress_bat_dong_san
+    name: "VnExpress - Bất động sản"
+    url: "https://vnexpress.net/rss/bat-dong-san.rss"
+    type: rss
+    priority: low
+    active: true
+    categories: [bat_dong_san]
+
+  # === Google News RSS — search theo từng doanh nghiệp ===
+  # URL được inject tự động từ companies.yaml lúc runtime
+  - id: google_news_template
+    name: "Google News - {company_name}"
+    url: "https://news.google.com/rss/search?q={query}&hl=vi&gl=VN&ceid=VN:vi"
+    type: google_rss
+    priority: high
+    active: true
+    poll_interval_sec: 600    # 10 phút (Google rate limit)
+    categories: [google_news]
