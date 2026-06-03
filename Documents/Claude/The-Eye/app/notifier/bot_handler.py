@@ -87,28 +87,34 @@ async def cmd_help(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
     """Gửi danh sách lệnh."""
     text = (
         "👁 <b>The-Eye — Trợ lý theo dõi tin doanh nghiệp</b>\n\n"
-        "<b>📊 Báo cáo:</b>\n"
+
+        "<b>🔔 Thông báo cá nhân (vào DM của bạn):</b>\n"
+        "  /subscribe       — Đăng ký nhận thông báo\n"
+        "  /unsubscribe     — Tắt thông báo\n"
+        "  /myalerts        — Xem & chỉnh cấu hình của bạn\n"
+        "  /only <code>VIC SBT</code>   — Chỉ nhận tin của ticker cụ thể\n"
+        "  /alltickers      — Nhận tin của tất cả công ty\n"
+        "  /neg_only        — Chỉ nhận tin 🔴 tiêu cực\n"
+        "  /pos_neg         — Nhận cả 🟢 tích cực + 🔴 tiêu cực\n\n"
+
+        "<b>📊 Tra cứu báo cáo:</b>\n"
         "  /report <code>TICKER</code> <i>[24h|48h|7d]</i> — Báo cáo 1 công ty\n"
-        "  /all <i>[24h|48h|7d]</i> — Tổng quan tất cả\n"
-        "  /top <code>pos</code>|<code>neg</code> <i>[7d]</i> — Top tin POS/NEG\n"
-        "  /list — Danh sách ticker đang theo dõi\n\n"
-        "<b>🔎 Tìm kiếm & Xuất dữ liệu:</b>\n"
-        "  /search <code>từ khóa</code> <i>[7d]</i> — Tìm bài theo từ khóa\n"
-        "  /export <i>[24h|48h|7d]</i> — Xuất CSV về máy\n\n"
-        "<b>🔔 Heading News (NEG tức thì):</b>\n"
-        "  /watching — Xem cấu hình hiện tại\n"
-        "  /watch <code>TICKER</code> — Bật cho ticker\n"
-        "  /unwatch <code>TICKER</code> — Tắt cho ticker\n"
-        "  /watchall — Nhận từ tất cả ticker\n\n"
+        "  /all <i>[24h|48h|7d]</i>    — Tổng quan tất cả công ty\n"
+        "  /top <code>pos</code>|<code>neg</code> <i>[7d]</i>  — Top tin POS/NEG\n"
+        "  /search <code>từ khóa</code> <i>[7d]</i>  — Tìm bài theo từ khóa\n"
+        "  /list            — Danh sách ticker đang theo dõi\n"
+        "  /export <i>[7d]</i>          — Xuất CSV về máy\n\n"
+
         "<b>⚙️ Hệ thống:</b>\n"
-        "  /ping — Kiểm tra RSS feeds\n"
-        "  /status — Trạng thái hệ thống\n"
-        "  /clear <i>[N]</i> — Xóa N tin nhắn gần đây (mặc định 50)\n\n"
-        "<b>Ví dụ:</b>\n"
+        "  /status          — Trạng thái hệ thống\n"
+        "  /ping            — Kiểm tra RSS feeds\n"
+        "  /clear <i>[N]</i>            — Xóa N tin nhắn trong group\n\n"
+
+        "<b>Ví dụ nhanh:</b>\n"
+        "  <code>/subscribe</code>\n"
+        "  <code>/only VIC DGC</code>\n"
         "  <code>/report SBT 48h</code>\n"
-        "  <code>/search lợi nhuận giảm 7d</code>\n"
-        "  <code>/export 7d</code>\n"
-        "  <code>/watch NAF</code>"
+        "  <code>/search lợi nhuận giảm 7d</code>"
     )
     await update.message.reply_text(text, parse_mode=ParseMode.HTML)
 
@@ -520,6 +526,172 @@ async def cmd_clear(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
         pass
 
 
+# ─── Subscribe commands ─────────────────────────────────────────
+
+async def cmd_subscribe(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+    """/subscribe — đăng ký nhận thông báo vào chat riêng."""
+    from app.notifier.subscriber import subscribe, format_subscriber_config, get_subscriber
+
+    user = update.effective_user
+    chat_id = update.effective_chat.id
+
+    is_new, status = await subscribe(
+        chat_id=chat_id,
+        username=user.username,
+        first_name=user.first_name,
+    )
+
+    if status == "already_active":
+        sub = await get_subscriber(chat_id)
+        await update.message.reply_text(
+            f"ℹ️ Bạn đã đăng ký rồi.\n\n{format_subscriber_config(sub)}",
+            parse_mode=ParseMode.HTML,
+        )
+    elif status == "reactivated":
+        sub = await get_subscriber(chat_id)
+        await update.message.reply_text(
+            f"✅ Đã bật lại thông báo!\n\n{format_subscriber_config(sub)}",
+            parse_mode=ParseMode.HTML,
+        )
+    else:
+        await update.message.reply_text(
+            f"✅ <b>Đăng ký thành công!</b>\n\n"
+            f"Mặc định bạn sẽ nhận thông báo 🔴 <b>tiêu cực</b> về <b>NAF</b>.\n\n"
+            f"<b>Tuỳ chỉnh thêm:</b>\n"
+            f"  /only <code>VIC SBT</code>  — theo dõi ticker khác\n"
+            f"  /alltickers           — nhận tin của tất cả công ty\n"
+            f"  /pos_neg              — nhận cả tin tích cực\n"
+            f"  /myalerts             — xem cấu hình của bạn\n"
+            f"  /unsubscribe          — tắt thông báo\n\n"
+            f"<i>Dùng /help để xem tất cả lệnh.</i>",
+            parse_mode=ParseMode.HTML,
+        )
+        log.info(f"[bot] New subscriber: {user.username or user.first_name} (chat_id={chat_id})")
+
+
+async def cmd_unsubscribe(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+    """/unsubscribe — tắt thông báo cá nhân."""
+    from app.notifier.subscriber import unsubscribe as do_unsubscribe
+
+    chat_id = update.effective_chat.id
+    ok = await do_unsubscribe(chat_id)
+
+    if ok:
+        await update.message.reply_text(
+            "✅ Đã tắt thông báo. Bạn vẫn dùng được các lệnh tra cứu.\n"
+            "Gõ /subscribe để bật lại bất cứ lúc nào.",
+            parse_mode=ParseMode.HTML,
+        )
+    else:
+        await update.message.reply_text(
+            "ℹ️ Bạn chưa đăng ký hoặc đã tắt trước đó.\n"
+            "Gõ /subscribe để đăng ký.",
+            parse_mode=ParseMode.HTML,
+        )
+
+
+async def cmd_myalerts(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+    """/myalerts — xem và chỉnh cấu hình thông báo cá nhân."""
+    from app.notifier.subscriber import get_subscriber, format_subscriber_config
+
+    chat_id = update.effective_chat.id
+    sub = await get_subscriber(chat_id)
+
+    if not sub or not sub.active:
+        await update.message.reply_text(
+            "ℹ️ Bạn chưa đăng ký nhận thông báo cá nhân.\n"
+            "Gõ /subscribe để bắt đầu.",
+            parse_mode=ParseMode.HTML,
+        )
+        return
+
+    await update.message.reply_text(
+        format_subscriber_config(sub),
+        parse_mode=ParseMode.HTML,
+    )
+
+
+async def cmd_only(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+    """/only VIC SBT — chỉ nhận tin của những ticker này."""
+    from app.notifier.subscriber import get_subscriber, set_tickers
+
+    chat_id = update.effective_chat.id
+    sub = await get_subscriber(chat_id)
+    if not sub or not sub.active:
+        await update.message.reply_text(
+            "⚠️ Bạn chưa đăng ký. Dùng /subscribe trước.",
+            parse_mode=ParseMode.HTML,
+        )
+        return
+
+    if not ctx.args:
+        await update.message.reply_text(
+            "⚠️ Thiếu ticker. Ví dụ: <code>/only VIC SBT DGC</code>\n"
+            "Dùng /alltickers để nhận tin của tất cả công ty.",
+            parse_mode=ParseMode.HTML,
+        )
+        return
+
+    tickers = [t.upper() for t in ctx.args]
+    await set_tickers(chat_id, tickers)
+    tickers_str = " · ".join(f"<b>{t}</b>" for t in tickers)
+    await update.message.reply_text(
+        f"✅ Chỉ nhận thông báo từ: {tickers_str}",
+        parse_mode=ParseMode.HTML,
+    )
+
+
+async def cmd_alltickers(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+    """/alltickers — nhận thông báo từ tất cả công ty."""
+    from app.notifier.subscriber import get_subscriber, set_tickers
+
+    chat_id = update.effective_chat.id
+    sub = await get_subscriber(chat_id)
+    if not sub or not sub.active:
+        await update.message.reply_text("⚠️ Bạn chưa đăng ký. Dùng /subscribe trước.")
+        return
+
+    await set_tickers(chat_id, None)
+    await update.message.reply_text(
+        "✅ Nhận thông báo từ <b>tất cả</b> công ty.",
+        parse_mode=ParseMode.HTML,
+    )
+
+
+async def cmd_neg_only(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+    """/neg_only — chỉ nhận tin tiêu cực."""
+    from app.notifier.subscriber import get_subscriber, set_sentiments
+
+    chat_id = update.effective_chat.id
+    sub = await get_subscriber(chat_id)
+    if not sub or not sub.active:
+        await update.message.reply_text("⚠️ Bạn chưa đăng ký. Dùng /subscribe trước.")
+        return
+
+    await set_sentiments(chat_id, ["NEG"])
+    await update.message.reply_text(
+        "✅ Chỉ nhận tin 🔴 <b>tiêu cực</b> (NEG).",
+        parse_mode=ParseMode.HTML,
+    )
+
+
+async def cmd_pos_neg(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+    """/pos_neg — nhận cả tin tích cực và tiêu cực."""
+    from app.notifier.subscriber import get_subscriber, set_sentiments
+
+    chat_id = update.effective_chat.id
+    sub = await get_subscriber(chat_id)
+    if not sub or not sub.active:
+        await update.message.reply_text("⚠️ Bạn chưa đăng ký. Dùng /subscribe trước.")
+        return
+
+    await set_sentiments(chat_id, ["POS", "NEG"])
+    await update.message.reply_text(
+        "✅ Nhận tin 🟢 <b>tích cực</b> + 🔴 <b>tiêu cực</b> (POS + NEG).",
+        parse_mode=ParseMode.HTML,
+    )
+
+
 async def cmd_unknown(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
     """Xử lý lệnh không biết."""
     await update.message.reply_text(
@@ -534,21 +706,35 @@ def build_application() -> Application:
     """Tạo Telegram Application với đầy đủ handlers."""
     app = Application.builder().token(BOT_TOKEN).build()
 
-    app.add_handler(CommandHandler("start",    cmd_help))
-    app.add_handler(CommandHandler("help",     cmd_help))
-    app.add_handler(CommandHandler("report",   cmd_report))
-    app.add_handler(CommandHandler("all",      cmd_all))
-    app.add_handler(CommandHandler("status",   cmd_status))
-    app.add_handler(CommandHandler("top",      cmd_top))
-    app.add_handler(CommandHandler("list",     cmd_list))
-    app.add_handler(CommandHandler("search",   cmd_search))
-    app.add_handler(CommandHandler("ping",     cmd_ping))
-    app.add_handler(CommandHandler("export",   cmd_export))
-    app.add_handler(CommandHandler("watch",    cmd_watch))
-    app.add_handler(CommandHandler("unwatch",  cmd_unwatch))
-    app.add_handler(CommandHandler("watchall", cmd_watchall))
-    app.add_handler(CommandHandler("watching", cmd_watching))
-    app.add_handler(CommandHandler("clear",    cmd_clear))
+    # Tra cứu
+    app.add_handler(CommandHandler("start",       cmd_subscribe))
+    app.add_handler(CommandHandler("help",        cmd_help))
+    app.add_handler(CommandHandler("report",      cmd_report))
+    app.add_handler(CommandHandler("all",         cmd_all))
+    app.add_handler(CommandHandler("status",      cmd_status))
+    app.add_handler(CommandHandler("top",         cmd_top))
+    app.add_handler(CommandHandler("list",        cmd_list))
+    app.add_handler(CommandHandler("search",      cmd_search))
+    app.add_handler(CommandHandler("ping",        cmd_ping))
+    app.add_handler(CommandHandler("export",      cmd_export))
+
+    # Watchlist (alert_config — toàn group)
+    app.add_handler(CommandHandler("watch",       cmd_watch))
+    app.add_handler(CommandHandler("unwatch",     cmd_unwatch))
+    app.add_handler(CommandHandler("watchall",    cmd_watchall))
+    app.add_handler(CommandHandler("watching",    cmd_watching))
+
+    # Subscribe (cá nhân — nhận vào DM)
+    app.add_handler(CommandHandler("subscribe",   cmd_subscribe))
+    app.add_handler(CommandHandler("unsubscribe", cmd_unsubscribe))
+    app.add_handler(CommandHandler("myalerts",    cmd_myalerts))
+    app.add_handler(CommandHandler("only",        cmd_only))
+    app.add_handler(CommandHandler("alltickers",  cmd_alltickers))
+    app.add_handler(CommandHandler("neg_only",    cmd_neg_only))
+    app.add_handler(CommandHandler("pos_neg",     cmd_pos_neg))
+
+    # Tiện ích
+    app.add_handler(CommandHandler("clear",       cmd_clear))
 
     return app
 
@@ -556,20 +742,18 @@ def build_application() -> Application:
 async def set_bot_commands(application: Application) -> None:
     """Đăng ký danh sách lệnh hiện trên Telegram UI."""
     commands = [
-        BotCommand("report",   "Báo cáo công ty: /report VIC [24h|48h|7d]"),
-        BotCommand("all",      "Tổng quan tất cả: /all [24h|48h|7d]"),
-        BotCommand("top",      "Top tin POS/NEG: /top pos|neg [7d]"),
-        BotCommand("search",   "Tìm bài: /search từ khóa [7d]"),
-        BotCommand("list",     "Danh sách công ty đang theo dõi"),
-        BotCommand("export",   "Xuất CSV: /export [24h|48h|7d]"),
-        BotCommand("ping",     "Kiểm tra RSS feeds"),
-        BotCommand("watching", "Xem cấu hình Heading News"),
-        BotCommand("watch",    "Bật Heading News: /watch VIC"),
-        BotCommand("unwatch",  "Tắt Heading News: /unwatch VIC"),
-        BotCommand("watchall", "Nhận Heading News từ tất cả ticker"),
-        BotCommand("status",   "Trạng thái hệ thống"),
-        BotCommand("clear",    "Xóa tin nhắn gần đây: /clear [N]"),
-        BotCommand("help",     "Hướng dẫn sử dụng"),
+        BotCommand("subscribe",   "Đăng ký nhận thông báo cá nhân vào DM"),
+        BotCommand("unsubscribe", "Tắt thông báo cá nhân"),
+        BotCommand("myalerts",    "Xem & chỉnh cấu hình thông báo của bạn"),
+        BotCommand("report",      "Báo cáo công ty: /report VIC [24h|48h|7d]"),
+        BotCommand("all",         "Tổng quan tất cả công ty"),
+        BotCommand("top",         "Top tin: /top pos|neg [7d]"),
+        BotCommand("search",      "Tìm bài: /search từ khóa [7d]"),
+        BotCommand("export",      "Xuất CSV dữ liệu"),
+        BotCommand("list",        "Danh sách công ty đang theo dõi"),
+        BotCommand("ping",        "Kiểm tra RSS feeds"),
+        BotCommand("status",      "Trạng thái hệ thống"),
+        BotCommand("help",        "Hướng dẫn đầy đủ"),
     ]
     await application.bot.set_my_commands(commands)
     log.info("[bot] Commands registered on Telegram")

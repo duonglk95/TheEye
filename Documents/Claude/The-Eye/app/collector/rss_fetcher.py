@@ -154,6 +154,12 @@ async def _save_entry(
 
     published_at = _parse_pubdate(entry)
 
+    # Bỏ qua bài cũ hơn 48h — tránh RSS feed trả về bài cũ gây thông báo sai
+    cutoff_48h = datetime.now(timezone.utc) - timedelta(hours=48)
+    if published_at < cutoff_48h:
+        log.debug(f"Skipping old article (published {published_at.isoformat()}): {title[:60]}")
+        return []
+
     # Unescape HTML entities (e.g. &nbsp; → space) rồi normalize whitespace
     title_clean = re.sub(r"\s+", " ", html_lib.unescape(title)).strip()
 

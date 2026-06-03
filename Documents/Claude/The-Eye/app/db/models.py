@@ -1,7 +1,7 @@
 from datetime import datetime
 from sqlalchemy import (
     BigInteger, Boolean, Column, Date, Float, ForeignKey,
-    Integer, String, Text, TIMESTAMP, ARRAY
+    Integer, String, Text, TIMESTAMP, ARRAY, UniqueConstraint
 )
 from sqlalchemy.orm import DeclarativeBase, relationship
 from sqlalchemy.dialects.postgresql import JSONB
@@ -122,6 +122,26 @@ class StockDaily(Base):
     extra = Column(JSONB)   # dữ liệu bổ sung từ vnstock nếu có
 
     company = relationship("Company", back_populates="stock_data")
+
+
+class Subscriber(Base):
+    """
+    Người dùng đã /subscribe — nhận push notification vào chat riêng.
+    Mỗi subscriber có thể lọc theo tickers cụ thể.
+    """
+    __tablename__ = "subscribers"
+
+    id          = Column(Integer, primary_key=True)
+    chat_id     = Column(BigInteger, unique=True, nullable=False)  # Telegram chat_id
+    username    = Column(String(100))                              # @username (tuỳ chọn)
+    first_name  = Column(String(100))
+    # tickers = None → nhận tất cả; ["VIC","SBT"] → chỉ nhận ticker đó
+    tickers     = Column(ARRAY(String(10)), nullable=True)
+    # loại tin nhận: ["POS","NEG"] hoặc ["NEG"] hoặc ["POS","NEG","NEU"]
+    sentiments  = Column(ARRAY(String(5)), default=["NEG"])
+    active      = Column(Boolean, default=True)
+    subscribed_at = Column(TIMESTAMP(timezone=True), default=datetime.utcnow)
+    last_seen_at  = Column(TIMESTAMP(timezone=True))
 
 
 # Index declarations (được tạo qua migration)

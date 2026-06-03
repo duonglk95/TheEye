@@ -96,14 +96,86 @@ def _format_article(article: ArticleMeta, company: Company) -> str:
     )
 
 
+async def _send_to_chat(chat_id: int | str, text: str) -> bool:
+    """Gửi message đến 1 chat_id cụ thể."""
+    try:
+        async with httpx.AsyncClient() as client:
+            resp = await client.post(
+                f"{API_BASE}/sendMessage",
+                json={
+                    "chat_id": chat_id,
+                    "text": text,
+                    "parse_mode": "HTML",
+                    "disable_web_page_preview": True,
+                },
+                timeout=10,
+            )
+            resp.raise_for_status()
+            return True
+    except Exception as e:
+        log.error(f"Telegram send failed to {chat_id}: {e}")
+        return False
+
+
+async def _broadcast(text: str, ticker: str | None = None, sentiment: str | None = None) -> int:
+    """
+    Gửi đến:
+      1. CHAT_ID chính (group/owner) — luôn nhận
+      2. Tất cả subscribers active phù hợp với ticker + sentiment
+    Trả về số lượng gửi thành công.
+    """
+    from app.notifier.subscriber import get_all_active
+
+    targets: set[int] = {int(CHAT_ID)}  # Luôn gửi cho owner
+
+    # Gửi cho subscribers phù hợp
+    subscribers = await get_all_active()
+    for sub in subscribers:
+        if int(sub.chat_id) == int(CHAT_ID):
+            continue  # Owner đã có trong targets
+
+        # Kiểm tra ticker filter
+        if sub.tickers and ticker and ticker.upper() not in sub.tickers:
+            continue
+
+        # Kiểm tra sentiment filter
+        if sentiment and sub.sentiments and sentiment not in sub.sentiments:
+            continue
+
+        targets.add(int(sub.chat_id))
+
+    ok_count = 0
+    for chat_id in targets:
+        if await _send_to_chat(chat_id, text):
+            ok_count += 1
+        await asyncio.sleep(0.05)  # Tránh Telegram rate limit
+
+    return ok_count
+
+
 async def send_immediate(article_id: int) -> bool:
     """
-    Gửi ngay 1 tin NEG nếu ticker nằm trong watchlist.
-    Dùng cho cả lần gửi đầu (scheduler) và retry job.
+    Gửi ngay 1 tin NEG/POS tới owner + subscribers phù hợp.
     """
+    cutoff_48h = datetime.now(timezone.utc) - timedelta(hours=48)
+
     async with AsyncSessionLocal() as session:
         article = await session.get(ArticleMeta, article_id)
         if not article or article.notified:
+            return False
+
+        # Bỏ qua và tự mark bài quá 48h — tránh alert tin cũ sau restart/outage
+        if article.published_at < cutoff_48h:
+            await session.execute(
+                update(ArticleMeta)
+                .where(ArticleMeta.id == article_id)
+                .values(notified=True, notified_at=datetime.now(timezone.utc))
+            )
+            await session.commit()
+            log.info(
+                f"[notifier] Auto-dismissed old article #{article_id} "
+                f"(published_at={article.published_at.isoformat()})"
+            )
             return False
 
         company = await session.get(Company, article.company_id)
@@ -119,15 +191,19 @@ async def send_immediate(article_id: int) -> bool:
             f"{_format_article(article, company)}"
         )
 
-        ok = await _send(text)
-        if ok:
+    sent = await _broadcast(text, ticker=company.ticker, sentiment=article.sentiment)
+
+    if sent > 0:
+        async with AsyncSessionLocal() as session:
             await session.execute(
                 update(ArticleMeta)
                 .where(ArticleMeta.id == article_id)
                 .values(notified=True, notified_at=datetime.now(timezone.utc))
             )
             await session.commit()
-        return ok
+        log.info(f"[notifier] Immediate alert sent to {sent} recipients for article #{article_id}")
+
+    return sent > 0
 
 
 async def send_digest() -> bool:
@@ -136,13 +212,15 @@ async def send_digest() -> bool:
     Đồng thời mark NEU trong window là notified để dọn queue.
     """
     since = datetime.now(timezone.utc) - timedelta(hours=2)
+    cutoff_48h = datetime.now(timezone.utc) - timedelta(hours=48)
 
     async with AsyncSessionLocal() as session:
-        # Lấy POS chưa notify
+        # Lấy POS chưa notify — chỉ bài trong 48h theo published_at
         pos_result = await session.execute(
             select(ArticleMeta, Company)
             .join(Company, ArticleMeta.company_id == Company.id)
             .where(ArticleMeta.fetched_at >= since)
+            .where(ArticleMeta.published_at >= cutoff_48h)
             .where(ArticleMeta.notified == False)   # noqa: E711
             .where(ArticleMeta.sentiment == "POS")
             .order_by(ArticleMeta.company_id, ArticleMeta.published_at.desc())
@@ -150,11 +228,15 @@ async def send_digest() -> bool:
         rows = pos_result.fetchall()
 
         # Lấy NEU để mark notified (housekeeping — không gửi)
+        # Bao gồm cả bài NEU cũ hơn 48h để dọn sạch queue tồn đọng
         neu_result = await session.execute(
             select(ArticleMeta.id)
-            .where(ArticleMeta.fetched_at >= since)
             .where(ArticleMeta.notified == False)   # noqa: E711
             .where(ArticleMeta.sentiment == "NEU")
+            .where(
+                (ArticleMeta.fetched_at >= since) |
+                (ArticleMeta.published_at < cutoff_48h)
+            )
         )
         neu_ids = [r[0] for r in neu_result.fetchall()]
 
