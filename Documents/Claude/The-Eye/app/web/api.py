@@ -71,6 +71,9 @@ def build_app(token: str | None) -> web.Application:
         parsed, errors = validate_labels(body.get("labels") if isinstance(body, dict) else None)
         labeler = str((body or {}).get("labeler") or "claude-task")
         result = await import_labels(parsed, labeler=labeler)
+        if result["saved"]:
+            from app.learning.train_trigger import AFTER_LLM_LABELS_SEC, request_training
+            request_training(AFTER_LLM_LABELS_SEC)      # chấm xong thì học luôn
         log.info(f"[labeling-api] {labeler}: saved {result['saved']} {result['by_label']}, errors {len(errors)}")
         return web.json_response({**result, "errors": errors[:50]})
 

@@ -115,3 +115,15 @@ def test_unlinked_articles_not_amplified():
     samples = [_s(i, "NEU", "llm", f"nvl {i}", "NVL") for i in range(50)] + [_s(900, "NEU", "llm", "lê đức giang", "_none")]
     merged, stats = dedupe_and_balance(samples)
     assert stats["company_weight"]["_none"] == 1.0
+
+
+def test_training_trigger_debounces():
+    from app.learning import train_trigger as tt
+    tt._due_at = None
+    assert not tt.is_due()
+    tt.request_training(120)
+    first = tt._due_at
+    tt.request_training(120)                 # nhãn mới đến → dời hạn ra sau
+    assert tt._due_at >= first
+    assert not tt.is_due(now=tt._due_at - 1) and tt.is_due(now=tt._due_at + 1)
+    tt._due_at = None

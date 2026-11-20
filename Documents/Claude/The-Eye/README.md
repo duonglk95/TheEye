@@ -33,7 +33,7 @@
   - 🟢 **Tích cực (POS)** — tin tốt cho doanh nghiệp
   - 🔴 **Tiêu cực (NEG)** — tin xấu, rủi ro
   - ⚪ **Trung lập (NEU)** — thông báo, thông tin thường
-- 🧠 **Tự học mỗi đêm** (mô hình máy học nhẹ, không dùng LLM trên server) — xem [mục 12b](#12b-bao-tự-học--đọc-toàn-bài--ý-nghĩa-con-số-)
+- 🧠 **Tự học ngay khi có nhãn mới** (mô hình máy học nhẹ, không dùng LLM trên server) — xem [mục 12b](#12b-bao-tự-học--đọc-toàn-bài--ý-nghĩa-con-số-)
 - 📱 **Gửi cảnh báo Telegram ngay** khi có tin xấu; tin tốt gom vào **bản tin 2 tiếng/lần** (8h–22h)
 - 👆 **Dùng bằng nút bấm** — người dùng không cần gõ lệnh
 
@@ -57,7 +57,7 @@ Mỗi 10 phút:
   Tải thân bài ─► Đọc lại toàn bài ─► đổi nhãn nếu thân bài khác tiêu đề (thành 🔴 → báo ngay)
 
 T2–T6, 04:55:  Claude Haiku (Scheduled Task, dùng gói Claude) chấm nhãn các tin mới qua API của bot
-Mỗi đêm 02:30: Bao tự học từ các nhãn đó → chỉ dùng mô hình mới nếu tốt hơn bản cũ
+Ngay sau đó:   Bao tự học từ các nhãn mới → chỉ dùng mô hình mới nếu tốt hơn bản cũ
 
 Người dùng chạm nút 📊 VIC ─► Báo cáo tin VIC 24h
 ```
@@ -601,8 +601,11 @@ negative:
 ### Bao tự học thế nào?
 
 ```
-Nhãn đúng  ──►  Gộp tin trùng + cân bằng công ty  ──►  Train (02:30 mỗi đêm)  ──►  Kiểm định  ──►  Dùng nếu tốt hơn
+Nhãn mới  ──►  Gộp tin trùng + cân bằng công ty  ──►  Train  ──►  Kiểm định  ──►  Dùng nếu tốt hơn
 ```
+
+**Khi nào học:** chấm xong thì học luôn — 2 phút sau lô nhãn cuối của Claude, 10 phút sau lượt chấm cuối của admin
+(nhãn đến liên tiếp thì đợi đến hết đợt rồi train 1 lần). Bot khởi động lại mà còn nhãn chưa học thì tự train bù.
 
 **Nguồn nhãn** (theo độ tin cậy):
 
