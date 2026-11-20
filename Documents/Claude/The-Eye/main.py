@@ -34,6 +34,20 @@ async def run_service():
     await ping()
     log.info("Database connected.")
     await apply_migrations()
+
+    # Đồng bộ companies.yaml / sources.yaml vào DB (chỉ thêm/cập nhật, không xoá công ty có sẵn trong DB)
+    from app.db.seed import main as seed_from_yaml
+    try:
+        await seed_from_yaml()
+    except Exception as e:      # YAML lỗi không được làm sập bot
+        log.error(f"seed from yaml failed: {e}")
+
+    # Bài không còn khớp từ khoá công ty đang gắn (VD sau khi sửa từ khoá DGC) → gắn lại / bỏ gắn
+    from app.collector.rss_fetcher import rematch_existing
+    try:
+        await rematch_existing()
+    except Exception as e:
+        log.error(f"rematch_existing failed: {e}")
     await start_scheduler()
 
 

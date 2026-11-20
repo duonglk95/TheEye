@@ -33,7 +33,7 @@ def test_validate_labels_skips_bad_items():
 def fake_db(monkeypatch):
     saved = {}
 
-    async def fake_pending(days, limit):
+    async def fake_pending(days, limit, **_kw):
         return [{"id": 7, "ticker": "SBT", "title": "t"}][:limit]
 
     async def fake_import(labels, labeler):

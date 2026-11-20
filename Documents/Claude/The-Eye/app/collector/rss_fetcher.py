@@ -19,7 +19,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from app.db import AsyncSessionLocal
 from app.db.models import ArticleMeta, Company, FeedSource
-from app.config import load_sources, load_companies
+from app.config import load_companies, load_sources
 
 log = logging.getLogger(__name__)
 
@@ -114,6 +114,56 @@ async def _fetch_feed(url: str, client: httpx.AsyncClient) -> list:
         return []
 
 
+async def load_active_companies(session) -> list[dict]:
+    """
+    Danh sách công ty đang theo dõi LẤY TỪ DATABASE (nguồn chuẩn).
+    companies.yaml chỉ dùng để thêm/cập nhật công ty (đồng bộ lúc khởi động) —
+    công ty chỉ có trong DB (VD thêm từ máy khác) vẫn được theo dõi.
+    """
+    cfg = {c["ticker"]: c for c in load_companies()}
+    result = await session.execute(select(Company).where(Company.active == True))  # noqa: E712
+    out = []
+    for db_obj in result.scalars().all():
+        keywords = list(db_obj.keywords or []) or cfg.get(db_obj.ticker, {}).get("keywords", [])
+        if not keywords:
+            continue
+        out.append({"ticker": db_obj.ticker, "name": db_obj.name, "keywords": keywords, "db_id": db_obj.id})
+    return out
+
+
+async def rematch_existing(days: int = 120) -> dict:
+    """
+    Sau khi đổi từ khoá: bài nào KHÔNG còn khớp công ty đang gắn thì gắn lại công ty khớp,
+    hoặc bỏ gắn (company_id = NULL) nếu không khớp công ty nào. Không xoá bài.
+    Bài vẫn khớp công ty hiện tại thì giữ nguyên.
+    """
+    since = datetime.now(timezone.utc) - timedelta(days=days)
+    moved = unlinked = 0
+    async with AsyncSessionLocal() as session:
+        companies = await load_active_companies(session)
+        by_id = {c["db_id"]: c for c in companies}
+        rows = await session.execute(
+            select(ArticleMeta).where(ArticleMeta.company_id != None)  # noqa: E711
+            .where(ArticleMeta.published_at >= since)
+        )
+        for art in rows.scalars().all():
+            current = by_id.get(art.company_id)
+            if current is None:
+                continue                    # công ty đã tắt theo dõi → không đụng
+            text = f"{art.title} {art.summary or ''}"
+            if _match_company(text, [current], title=art.title) is not None:
+                continue
+            new_id = _match_company(text, companies, title=art.title)
+            art.company_id = new_id
+            if new_id is None:
+                unlinked += 1
+            else:
+                moved += 1
+        await session.commit()
+    log.info(f"rematch_existing: chuyển {moved} bài sang công ty khác, bỏ gắn {unlinked} bài")
+    return {"moved": moved, "unlinked": unlinked}
+
+
 FETCH_CONCURRENCY = 5
 _google_last_poll: float = 0.0
 
@@ -138,20 +188,10 @@ async def poll_feeds() -> list[int]:
     Trả về list article_id mới để classifier xử lý tiếp.
     """
     sources_cfg = load_sources()
-    companies_cfg = load_companies()
-
     new_article_ids: list[int] = []
 
     async with AsyncSessionLocal() as session:
-        # Lấy company db_id để match
-        result = await session.execute(select(Company).where(Company.active == True))
-        db_companies = result.scalars().all()
-        companies_with_id = [
-            {**c, "db_id": db_obj.id}
-            for c in companies_cfg
-            for db_obj in db_companies
-            if db_obj.ticker == c["ticker"]
-        ]
+        companies_with_id = await load_active_companies(session)
 
         # Lấy source_id map
         result = await session.execute(select(FeedSource).where(FeedSource.active == True))

@@ -4,6 +4,8 @@ HTTP API nhỏ chạy cùng bot (aiohttp) — cho Scheduled Task của Claude Co
   GET  /healthz                         → "ok" (không cần khoá)
   GET  /api/labeling/pending?days=7&limit=150
        → {"instructions": "...", "articles": [{id, ticker, company, published, title, summary, content}]}
+  GET  /api/labeling/pending?relabel=1&days=3650&limit=200&after_id=0
+       → chấm lại TẤT CẢ bài (trừ bài người dùng đã chấm), phân trang theo id; "next_after_id" cho trang sau
   POST /api/labeling/labels
        body {"labeler": "claude-haiku", "labels": [{"id": 123, "label": "POS", "reason": "..."}]}
        → {"saved": n, "unknown_ids": [...], "by_label": {...}, "errors": [...]}
@@ -49,10 +51,15 @@ def build_app(token: str | None) -> web.Application:
         return await handler(request)
 
     async def pending(request):
-        days = _int(request.query.get("days"), 7, 1, 60)
+        relabel = request.query.get("relabel") in ("1", "true", "yes")
+        days = _int(request.query.get("days"), 7, 1, 3650)
         limit = _int(request.query.get("limit"), 150, 1, 500)
-        articles = await fetch_pending(days, limit)
-        return web.json_response({"instructions": INSTRUCTIONS, "count": len(articles), "articles": articles})
+        after_id = _int(request.query.get("after_id"), 0, 0, 10**12)
+        articles = await fetch_pending(days, limit, relabel=relabel, after_id=after_id)
+        body = {"instructions": INSTRUCTIONS, "count": len(articles), "articles": articles}
+        if relabel:
+            body["next_after_id"] = articles[-1]["id"] if len(articles) == limit else None
+        return web.json_response(body)
 
     async def labels(request):
         try:

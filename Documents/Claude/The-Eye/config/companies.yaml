@@ -22,14 +22,15 @@ companies:
     name: "Hóa chất Đức Giang"
     full_name: "Công ty Cổ phần Tập đoàn Hóa chất Đức Giang"
     aliases:
-      - "Đức Giang"
       - "Hóa chất Đức Giang"
       - "DUGICO"
+    # KHÔNG dùng "Đức Giang" trần: khớp nhầm tên người (VD ông Lê Đức Giang, cựu PCT Thanh Hóa)
+    # và phường Đức Giang (Hà Nội)
     keywords:
       - "DGC"
-      - "Đức Giang"
       - "Hóa chất Đức Giang"
       - "Tập đoàn Đức Giang"
+      - "DUGICO"
     sector: "Hóa chất"
     exchange: HOSE
     active: true

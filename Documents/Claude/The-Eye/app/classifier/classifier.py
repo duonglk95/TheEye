@@ -171,7 +171,7 @@ async def deep_read_pending(limit: int = 50, max_age_hours: int = 72) -> list[Ch
             .where(ArticleContent.scraped_at != None)          # noqa: E711
             .where(ArticleContent.content_raw != None)         # noqa: E711
             .where((ArticleMeta.read_depth == None) | (ArticleMeta.read_depth != "full"))  # noqa: E711
-            .where((ArticleMeta.sentiment_method == None) | (ArticleMeta.sentiment_method != "human"))  # noqa: E711
+            .where((ArticleMeta.sentiment_method == None) | ArticleMeta.sentiment_method.not_in(("human", "llm")))  # noqa: E711
             .where(ArticleMeta.fetched_at >= since)
             .order_by(ArticleMeta.published_at.desc())
             .limit(limit)
