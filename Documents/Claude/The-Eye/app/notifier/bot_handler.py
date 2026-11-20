@@ -51,8 +51,15 @@ from app.notifier.alert_config import (
 log = logging.getLogger(__name__)
 
 
-def _rating_markup(report):
-    """Hàng nút 🔴 Xấu / ⚪ Thường / 🟢 Tốt cho các bài trong báo cáo (nếu có)."""
+def _is_admin_chat(update) -> bool:
+    from app.notifier.admin import is_admin_private_chat
+    return is_admin_private_chat(update.effective_chat.id)
+
+
+def _rating_markup(report, update):
+    """Hàng nút 🔴 Xấu / ⚪ Thường / 🟢 Tốt — CHỈ cho admin trong chat riêng."""
+    if not _is_admin_chat(update):
+        return None
     from app.notifier.rating import keyboard, to_telegram_markup
     return to_telegram_markup(keyboard(getattr(report, "article_ids", [])))
 
@@ -113,13 +120,6 @@ async def cmd_help(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
         "  /list            — Danh sách ticker đang theo dõi\n"
         "  /export <i>[7d]</i>          — Xuất CSV về máy\n\n"
 
-        "<b>🧠 Dạy bot (tự học):</b>\n"
-        "  Bấm ✅/🟢/🔴/⚪ dưới mỗi tin để xác nhận / sửa nhãn\n"
-        "  /fix <code>1234 pos|neg|neu</code> — Sửa nhãn bài #1234\n"
-        "  /why <code>1234</code>      — Vì sao bot chấm vậy, % nghĩa là gì\n"
-        "  /learn           — Độ chính xác hiện tại của bot\n"
-        "  /learn now       — Tự học ngay (chat chính)\n\n"
-
         "<b>⚙️ Hệ thống:</b>\n"
         "  /status          — Trạng thái hệ thống\n"
         "  /ping            — Kiểm tra RSS feeds\n"
@@ -153,13 +153,13 @@ async def cmd_report(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
         parse_mode=ParseMode.HTML,
     )
 
-    report = await build_company_report(ticker, hours)
+    report = await build_company_report(ticker, hours, numbered=_is_admin_chat(update))
     await wait_msg.delete()
     await update.message.reply_text(
         report,
         parse_mode=ParseMode.HTML,
         disable_web_page_preview=True,
-        reply_markup=_rating_markup(report),
+        reply_markup=_rating_markup(report, update),
     )
     log.info(f"[bot] /report {ticker} {hours}h → sent to chat {update.effective_chat.id}")
 
@@ -177,7 +177,7 @@ async def cmd_all(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
         report,
         parse_mode=ParseMode.HTML,
         disable_web_page_preview=True,
-        reply_markup=_rating_markup(report),
+        reply_markup=_rating_markup(report, update),
     )
 
 
@@ -201,13 +201,13 @@ async def cmd_top(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
 
     hours = _parse_hours(args[1] if len(args) > 1 else None)
     wait_msg = await update.message.reply_text("⏳ Đang tìm kiếm...", parse_mode=ParseMode.HTML)
-    report = await build_top_report(sentiment_raw, hours)
+    report = await build_top_report(sentiment_raw, hours, numbered=_is_admin_chat(update))
     await wait_msg.delete()
     await update.message.reply_text(
         report,
         parse_mode=ParseMode.HTML,
         disable_web_page_preview=True,
-        reply_markup=_rating_markup(report),
+        reply_markup=_rating_markup(report, update),
     )
 
 
@@ -312,13 +312,13 @@ async def cmd_search(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
     wait_msg = await update.message.reply_text(
         f"🔍 Đang tìm «<b>{keyword}</b>»...", parse_mode=ParseMode.HTML
     )
-    result = await search_articles(keyword, hours)
+    result = await search_articles(keyword, hours, numbered=_is_admin_chat(update))
     await wait_msg.delete()
     await update.message.reply_text(
         result,
         parse_mode=ParseMode.HTML,
         disable_web_page_preview=True,
-        reply_markup=_rating_markup(result),
+        reply_markup=_rating_markup(result, update),
     )
 
 
@@ -762,7 +762,7 @@ def build_application() -> Application:
 
     # Tự học — người dùng dạy bot, xem giải thích & độ chính xác
     from app.notifier.learning_commands import (
-        cb_feedback, cb_feedback_reopen, cb_noop, cb_rate, cmd_fix, cmd_learn, cmd_why,
+        cb_feedback, cb_feedback_reopen, cb_noop, cb_rate, cmd_fix, cmd_why,
     )
     app.add_handler(CallbackQueryHandler(cb_rate,            pattern=r"^r:"))
     app.add_handler(CallbackQueryHandler(cb_noop,            pattern=r"^rn:"))
@@ -771,7 +771,6 @@ def build_application() -> Application:
     app.add_handler(CommandHandler("fix",         cmd_fix))
     app.add_handler(CommandHandler("why",         cmd_why))
     app.add_handler(MessageHandler(filters.Regex(r"^/why_\d+"), cmd_why))
-    app.add_handler(CommandHandler("learn",       cmd_learn))
 
     return app
 
@@ -779,7 +778,8 @@ def build_application() -> Application:
 async def set_bot_commands(application: Application) -> None:
     """
     Danh sách lệnh hiện trên Telegram — chỉ giữ thứ người dùng cần.
-    Các lệnh khác (/all, /top, /search, /only, /status, /learn, /why, /fix...) vẫn hoạt động nhưng ẩn.
+    Các lệnh khác (/all, /top, /search, /only, /status...) vẫn hoạt động nhưng ẩn.
+    /fix, /why và nút chấm nhãn chỉ dành cho admin (xem app/notifier/admin.py).
     """
     commands = [
         BotCommand("menu",   "Hiện bàn phím nút: xem tin từng công ty"),

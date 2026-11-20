@@ -1,5 +1,5 @@
 """
-Vòng tự học — chạy mỗi đêm (02:30) hoặc khi gõ /learn now.
+Vòng tự học — chạy mỗi đêm (02:30) hoặc qua POST /api/admin/train (admin).
 
   1. GOM DỮ LIỆU
      gold   : nhãn người dùng xác nhận qua Telegram            trọng số 3.0
@@ -20,6 +20,7 @@ dương → lần sau tin tương tự được nhận ra dù tiêu đề không
 """
 import asyncio
 import logging
+import re
 from collections import Counter, defaultdict
 
 import numpy as np
@@ -30,7 +31,7 @@ from app.classifier import ml_model
 from app.classifier.ml_model import LABEL_IDX, LABELS, Sample, build_text
 from app.classifier.rule_based import read_article
 from app.db import AsyncSessionLocal
-from app.db.models import ArticleContent, ArticleMeta, TrainingLabel
+from app.db.models import ArticleContent, ArticleMeta, Company, TrainingLabel
 from app.learning.feedback import HUMAN_PREFIX
 from app.learning.label_export import LLM_PREFIX
 
@@ -114,10 +115,12 @@ async def build_dataset(current: ml_model.ModelBundle | None) -> tuple[list[Samp
         )
         llm = {aid: label for aid, label, _ in llm_rows.all()}     # mới nhất ghi đè
 
-        cols = (ArticleMeta.id, ArticleMeta.title, ArticleMeta.summary, func.left(ArticleContent.content_raw, 6000))
+        cols = (ArticleMeta.id, ArticleMeta.title, ArticleMeta.summary, func.left(ArticleContent.content_raw, 6000),
+                Company.ticker)
         recent = await session.execute(
             select(*cols)
             .outerjoin(ArticleContent, ArticleContent.article_id == ArticleMeta.id)
+            .outerjoin(Company, Company.id == ArticleMeta.company_id)
             .order_by(ArticleMeta.id.desc())
             .limit(MAX_ARTICLES)
         )
@@ -129,6 +132,7 @@ async def build_dataset(current: ml_model.ModelBundle | None) -> tuple[list[Samp
             older = await session.execute(
                 select(*cols)
                 .outerjoin(ArticleContent, ArticleContent.article_id == ArticleMeta.id)
+                .outerjoin(Company, Company.id == ArticleMeta.company_id)
                 .where(ArticleMeta.id.in_(missing))
             )
             articles += older.all()
@@ -140,38 +144,100 @@ async def build_dataset(current: ml_model.ModelBundle | None) -> tuple[list[Samp
     )
 
     samples: list[Sample] = []
-    pseudo_candidates: list[tuple[int, str]] = []
-    for aid, title, summary, content in articles:
+    pseudo_candidates: list[tuple[int, str, str, str]] = []
+    for aid, title, summary, content, ticker in articles:
         reading = read_article(title, summary, content)
         text = build_text(title, summary, content, _rule_hits(reading))
+        key, group = title_key(title), ticker or "_none"
         if aid in gold:
             label, weight = gold[aid]
-            samples.append(Sample(aid, text, label, weight, "gold"))
+            samples.append(Sample(aid, text, label, weight, "gold", key, group))
             continue
         if aid in llm:
-            samples.append(Sample(aid, text, llm[aid], LLM_WEIGHT, "llm"))
+            samples.append(Sample(aid, text, llm[aid], LLM_WEIGHT, "llm", key, group))
             continue
         lbl = silver_label(reading)
         if lbl:
-            samples.append(Sample(aid, text, lbl, SILVER_WEIGHT, "silver"))
+            samples.append(Sample(aid, text, lbl, SILVER_WEIGHT, "silver", key, group))
         elif pseudo_on and content:
-            pseudo_candidates.append((aid, text))
+            pseudo_candidates.append((aid, text, key, group))
 
     # Self-training: chỉ lấy pseudo vào tập TRAIN, không bao giờ vào tập kiểm định
     if pseudo_candidates:
-        texts = [t for _, t in pseudo_candidates]
+        texts = [c[1] for c in pseudo_candidates]
         probs = current.predict_proba(texts)
         cap = max(10, len(samples) // 2)       # pseudo không quá 1/2 dữ liệu thật
         picked = [
-            (aid, text, LABELS[int(p.argmax())], float(p.max()))
-            for (aid, text), p in zip(pseudo_candidates, probs)
+            (aid, text, key, group, LABELS[int(p.argmax())], float(p.max()))
+            for (aid, text, key, group), p in zip(pseudo_candidates, probs)
             if p.max() >= PSEUDO_MIN_PROB and not ml_model.is_validation(aid)
         ]
-        picked.sort(key=lambda x: -x[3])
-        samples += [Sample(aid, text, lbl, PSEUDO_WEIGHT, "pseudo") for aid, text, lbl, _ in picked[:cap]]
+        picked.sort(key=lambda x: -x[5])
+        samples += [Sample(aid, text, lbl, PSEUDO_WEIGHT, "pseudo", key, group)
+                    for aid, text, key, group, lbl, _ in picked[:cap]]
 
-    info = {"articles_scanned": len(articles), "gold": len(gold), "llm": len(llm), "pseudo_enabled": pseudo_on}
+    samples, balance = dedupe_and_balance(samples)
+    info = {"articles_scanned": len(articles), "gold": len(gold), "llm": len(llm),
+            "pseudo_enabled": pseudo_on, "dedup_balance": balance}
     return samples, info
+
+
+# ─── Gộp bài trùng & cân bằng công ty ───────────────────────────
+
+SOURCE_RANK = {"gold": 3, "llm": 2, "silver": 1, "pseudo": 0}
+BALANCE_MIN, BALANCE_MAX = 0.33, 3.0
+
+
+def title_key(title: str) -> str:
+    """Tiêu đề chuẩn hoá để nhận ra cùng 1 tin đăng lại: bỏ đuôi tên báo, dấu câu, khoảng trắng thừa."""
+    from app.notifier.formatting import short_title
+    t = short_title(title or "", limit=10_000, strip_source=True).lower()
+    return re.sub(r"\W+", " ", t).strip()
+
+
+def dedupe_and_balance(samples: list[Sample]) -> tuple[list[Sample], dict]:
+    """
+    1. GỘP TRÙNG: các bài cùng tiêu đề (key) → 1 mẫu.
+       Nhãn lấy từ nguồn tin cậy nhất trong nhóm (người chấm > Claude > luật > tự gán),
+       nhiều nhãn cùng nguồn thì theo đa số. Một tin đăng lại 30 lần chỉ tính như 1 tin.
+       Mẫu đại diện = bài có nội dung dài nhất; article_id = id nhỏ nhất của nhóm
+       → cả nhóm luôn cùng nằm ở train hoặc cùng ở kiểm định (không rò rỉ).
+    2. CÂN BẰNG CÔNG TY: trọng số × sqrt(trung bình số mẫu mỗi công ty / số mẫu của công ty đó),
+       kẹp trong [0.33, 3]. Công ty nhiều tin (VD NVL ~65% dữ liệu) bị giảm, công ty ít tin được tăng —
+       dùng căn bậc hai để không đảo ngược hẳn tỷ lệ.
+    """
+    groups: dict[str, list[Sample]] = {}
+    for s in samples:
+        groups.setdefault(s.key or f"#{s.article_id}", []).append(s)
+
+    merged: list[Sample] = []
+    for members in groups.values():
+        best_rank = max(SOURCE_RANK.get(m.source, 0) for m in members)
+        top = [m for m in members if SOURCE_RANK.get(m.source, 0) == best_rank]
+        votes = Counter(m.label for m in top)
+        best = max(votes.values())
+        label = max((m for m in top if votes[m.label] == best), key=lambda m: m.article_id).label
+        rep = max((m for m in top if m.label == label), key=lambda m: len(m.text))
+        merged.append(Sample(
+            article_id=min(m.article_id for m in members), text=rep.text, label=label,
+            weight=rep.weight, source=rep.source, key=rep.key, group=rep.group, dup_count=len(members),
+        ))
+    # Mẫu tự gán (pseudo) không bao giờ được rơi vào tập kiểm định
+    merged = [m for m in merged if not (m.source == "pseudo" and ml_model.is_validation(m.article_id))]
+
+    per_group = Counter(m.group or "_none" for m in merged)
+    mean = len(merged) / max(len(per_group), 1)
+    factor = {g: min(BALANCE_MAX, max(BALANCE_MIN, (mean / n) ** 0.5)) for g, n in per_group.items()}
+    for m in merged:
+        m.weight = round(m.weight * factor[m.group or "_none"], 4)
+
+    stats = {
+        "before_dedup": len(samples),
+        "after_dedup": len(merged),
+        "per_company": dict(per_group.most_common()),
+        "company_weight": {g: round(f, 2) for g, f in sorted(factor.items(), key=lambda x: x[1])},
+    }
+    return merged, stats
 
 
 def _score_model_on(bundle: ml_model.ModelBundle, samples: list[Sample]) -> dict:
@@ -184,7 +250,7 @@ def _score_model_on(bundle: ml_model.ModelBundle, samples: list[Sample]) -> dict
 
 
 async def run_learning() -> dict:
-    """Chạy 1 vòng tự học. Trả về report (dùng để gửi Telegram / hiển thị /learn)."""
+    """Chạy 1 vòng tự học. Trả về report (log / API admin)."""
     current = model_store.get_active() or await model_store.refresh_active()
     samples, info = await build_dataset(current)
     version = await model_store.next_version()

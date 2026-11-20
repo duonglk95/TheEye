@@ -1,10 +1,8 @@
 """
-Lệnh Telegram cho vòng tự học:
+Lệnh Telegram cho vòng tự học — CHỈ ADMIN (chủ bot) dùng được; người dùng thường không thấy:
   nút ✅/🟢/🔴/⚪ dưới mỗi tin   — dạy bot (callback "fb:<id>:<LABEL|OK>")
   /fix <id> pos|neg|neu          — sửa nhãn bằng lệnh
   /why <id>  hoặc  /why_<id>     — vì sao bot chấm như vậy, con số % nghĩa là gì
-  /learn                         — bot đang giỏi tới đâu (độ chính xác, độ khớp %)
-  /learn now                     — train ngay (chỉ chat chính)
 """
 import html as html_lib
 import logging
@@ -18,7 +16,8 @@ from telegram.ext import ContextTypes
 from app.classifier import model_store
 from app.db import AsyncSessionLocal
 from app.db.models import ArticleMeta, Company
-from app.learning.feedback import feedback_stats, record_feedback
+from app.learning.feedback import record_feedback
+from app.notifier.admin import is_admin
 from app.notifier.formatting import VN_TZ, confidence_text, esc, short_title
 
 log = logging.getLogger(__name__)
@@ -37,7 +36,17 @@ def _user(update: Update) -> tuple[int, str | None]:
 
 # ─── Feedback ────────────────────────────────────────────────────
 
+async def _deny_callback(update: Update) -> bool:
+    """True nếu người bấm không phải admin (đã trả lời từ chối)."""
+    if is_admin(_user(update)[0]):
+        return False
+    await update.callback_query.answer("Chỉ admin của Bao mới chấm nhãn được.", show_alert=True)
+    return True
+
+
 async def cb_feedback(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+    if await _deny_callback(update):
+        return
     query = update.callback_query
     m = re.fullmatch(r"fb:(\d+):(OK|POS|NEG|NEU)", query.data or "")
     if not m:
@@ -74,6 +83,8 @@ async def cb_feedback(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
 
 async def cb_feedback_reopen(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
     """Bấm vào nút 'đã ghi nhận' → hiện lại bộ nút để sửa."""
+    if await _deny_callback(update):
+        return
     from app.notifier.formatting import feedback_keyboard
     query = update.callback_query
     m = re.fullmatch(r"fbx:(\d+)", query.data or "")
@@ -86,7 +97,9 @@ async def cb_feedback_reopen(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> 
 
 
 async def cmd_fix(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
-    """/fix <id> pos|neg|neu"""
+    """/fix <id> pos|neg|neu — chỉ admin"""
+    if not is_admin(_user(update)[0]):
+        return          # im lặng với người dùng thường
     args = ctx.args or []
     label = _LABEL_ALIASES.get(args[1].lower()) if len(args) >= 2 else None
     if len(args) < 2 or not args[0].lstrip("#").isdigit() or not label:
@@ -101,7 +114,7 @@ async def cmd_fix(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
         return
     await update.message.reply_text(
         f"📝 Đã ghi nhận bài #{art.id} là {ICON[label]} <b>{NAME[label]}</b>.\n"
-        f"Bot sẽ học từ nhãn này ở lần tự học tiếp theo (02:30 hằng đêm hoặc /learn now).",
+        f"Bot sẽ học từ nhãn này ở lần tự học tiếp theo (02:30 hằng đêm).",
         parse_mode=ParseMode.HTML)
 
 
@@ -178,13 +191,15 @@ async def explain_article(article_id: int) -> str:
     else:
         lines.append("Ước lượng theo từ khoá, <b>chưa kiểm chứng</b>: 1 từ khoá ≈ 50%, "
                      "nhiều bằng chứng cùng chiều thì cao hơn, trái chiều thì thấp hơn.")
-        lines.append("<i>Khi đủ bài được xác nhận, bot học và % sẽ được kiểm chứng (/learn).</i>")
+        lines.append("<i>Khi đủ bài có nhãn, bot học và % sẽ được kiểm chứng.</i>")
     lines.append(f"\n<i>Sai? /fix {art.id} pos|neg|neu</i>")
     return "\n".join(lines)
 
 
 async def cmd_why(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
-    """/why <id>  hoặc  /why_<id>"""
+    """/why <id>  hoặc  /why_<id> — chỉ admin"""
+    if not is_admin(_user(update)[0]):
+        return
     text = update.message.text or ""
     m = re.match(r"^/why_(\d+)", text)
     raw = m.group(1) if m else ((ctx.args or [""])[0].lstrip("#") if ctx.args else "")
@@ -197,67 +212,6 @@ async def cmd_why(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
 
 # ─── Learning status ─────────────────────────────────────────────
 
-def _metrics_block(m: dict, scope: str) -> list[str]:
-    lines = [f"Độ chính xác: <b>{m.get('accuracy', 0):.0%}</b> <i>({m.get('n', 0)} bài kiểm tra, {scope})</i>"]
-    per = m.get("per_label", {})
-    if per:
-        lines.append("<i>" + " · ".join(
-            f"{ICON[l]} đúng {pl['precision']:.0%}, bắt được {pl['recall']:.0%}" for l, pl in per.items()) + "</i>")
-    if m.get("bins"):
-        lines += ["", "<b>Bot nói → thực tế đúng</b>"]
-        for b in m["bins"]:
-            lines.append(f"{b['range']} → {int(round(b['actual'] * 100))}% <i>({b['n']} bài)</i>")
-        lines.append(f"<i>Lệch trung bình: {m.get('ece', 0):.0%}</i>")
-    return lines
-
-
-async def learning_status() -> str:
-    bundle = model_store.get_active() or await model_store.refresh_active()
-    fb = await feedback_stats()
-    hist = await model_store.history(4)
-    lines = ["🧠 <b>Bao tự học</b>", ""]
-    if bundle is None:
-        lines.append("Chưa có mô hình — đang chấm bằng <b>từ khoá</b> (% chưa kiểm chứng).")
-        lines.append("<i>Bấm ✅🟢🔴⚪ dưới các tin để dạy bot.</i>")
-    else:
-        m = bundle.metrics
-        src = m.get("sources", {})
-        lines.append(f"Mô hình <b>v{bundle.version}</b> · học từ {m.get('n_train', 0)} bài "
-                     f"<i>(👤 {src.get('gold', 0)} xác nhận · 🤖 {src.get('llm', 0)} Claude · 📏 {src.get('silver', 0)} từ khoá · 🔁 {src.get('pseudo', 0)} tự gán)</i>")
-        lines.append("")
-        if "val_gold" in m:
-            lines += _metrics_block(m["val_gold"], "người dùng xác nhận")
-        else:
-            lines += _metrics_block(m.get("val", {}), "nhãn từ khoá")
-
-    lines += ["", f"👤 Đã được dạy <b>{fb['total']}</b> bài"]
-    if fb["bot_accuracy"] is not None:
-        lines.append(f"<i>Bot đoán đúng trước khi được dạy: {fb['bot_accuracy']:.0%} "
-                     f"({fb['agree']}/{fb['agree'] + fb['disagree']})</i>")
-    if hist:
-        icon = {"active": "✅", "retired": "▫️", "rejected": "↩️"}
-        lines += ["", "<b>Lịch sử</b>"]
-        for h in hist:
-            lines.append(f"{icon.get(h.status, '')} v{h.version} · {h.created_at.astimezone(VN_TZ):%d/%m %H:%M}\n"
-                         f"<i>{esc(h.note or '')}</i>")
-    return "\n".join(lines)
-
-
-async def cmd_learn(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
-    """/learn  |  /learn now"""
-    if ctx.args and ctx.args[0].lower() == "now":
-        owner = os.environ.get("TELEGRAM_CHAT_ID", "")
-        if str(update.effective_chat.id) != owner:
-            await update.message.reply_text("Chỉ chat chính mới được chạy /learn now.")
-            return
-        from app.learning.trainer import format_report, run_learning
-        await update.message.reply_text("⏳ Đang tự học...")
-        report = await run_learning()
-        await update.message.reply_text(format_report(report), parse_mode=ParseMode.HTML)
-        return
-    await update.message.reply_text(await learning_status(), parse_mode=ParseMode.HTML)
-
-
 # ─── Chấm 1 chạm (🔴 Xấu / ⚪ Thường / 🟢 Tốt) ───────────────────
 
 async def cb_rate(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
@@ -265,6 +219,8 @@ async def cb_rate(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
         CB_RE, FACE, ids_from_markup, keyboard, rating_to_label, to_telegram_markup, vote_counts,
     )
 
+    if await _deny_callback(update):
+        return
     query = update.callback_query
     m = CB_RE.fullmatch(query.data or "")
     if not m:

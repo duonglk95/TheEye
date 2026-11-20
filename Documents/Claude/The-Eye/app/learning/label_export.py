@@ -31,6 +31,18 @@ Với MỖI bài, đánh giá tin đó tốt hay xấu cho cổ đông của cô
 - NEU: trung tính — thông báo hành chính, lịch họp, giao dịch cổ đông thông thường, tin chung chung,
   hoặc bài không thực sự nói về công ty đó.
 Đọc cả nội dung trích, không chỉ tiêu đề (VD tiêu đề "nhận Huân chương" nhưng nội dung toàn tin tốt → POS).
+
+QUY ƯỚC cho các loại tin dễ chấm lệch — áp dụng nhất quán:
+1. Biến động giá / giao dịch thị trường (tăng trần, nằm sàn, khối ngoại mua/bán ròng, thanh khoản, top cổ phiếu
+   tăng/giảm) → NEU. Ngoại lệ: bài nêu RÕ nguyên nhân là một sự kiện của công ty → chấm theo sự kiện đó.
+2. Chuyển đổi trái phiếu thành cổ phiếu / hoán đổi nợ / tái cấu trúc nợ → NEU (tác động hai chiều: giảm nợ nhưng
+   pha loãng). Ngoại lệ: bài nêu rõ công ty chậm trả, không trả được nợ, hoặc trái chủ phản đối → NEG.
+3. Lùi hạn / huỷ đợt chào bán, chậm công bố báo cáo tài chính, bị nhắc nhở / cảnh báo / đưa vào diện kiểm soát → NEG.
+4. Bác bỏ tin đồn, công an xử lý người tung tin giả, đính chính → NEU.
+5. Giao dịch nội bộ (lãnh đạo, người liên quan, cổ đông lớn mua/bán) → NEU, trừ khi lượng bán rất lớn kèm
+   tín hiệu thoái lui (VD lãnh đạo bán gần hết) → NEG.
+6. Cùng một sự kiện đăng lại ở nhiều báo → chấm GIỐNG NHAU.
+
 Chấm đủ mọi bài. Lý do ngắn gọn, ≤ 15 từ, tiếng Việt."""
 
 

@@ -584,10 +584,15 @@ Chạm 1 nút là ra báo cáo 24h.
 
 > Trong group: cần tắt Privacy Mode (BotFather → `/setprivacy` → Disable) để bot thấy nút được chạm.
 
-### Dạy Bao: chấm tin 1 chạm
+### Dạy Bao (chỉ admin)
 
-Dưới mỗi tin (cảnh báo, bản tin, báo cáo) có hàng nút **🔴 Xấu · ⚪ Thường · 🟢 Tốt**.
-Chạm 1 lần là xong; nút hiện số người đã chọn (VD `🟢 Tốt 2`). Tin nhắn có nhiều bài thì mỗi bài 1 hàng, đánh số khớp với số trong tin.
+Giao diện Bao dành cho người dùng cuối: không có nút chấm, không có thông tin training.
+**Admin** (chủ bot — `ADMIN_USER_IDS`, mặc định là `TELEGRAM_CHAT_ID` nếu đó là chat riêng) khi xem tin trong
+chat riêng với Bao sẽ thấy thêm hàng nút **🔴 Xấu · ⚪ Thường · 🟢 Tốt** dưới mỗi tin; có thêm lệnh ẩn `/fix`, `/why`.
+
+Hằng ngày (T2–T6, 04:55) một Scheduled Task của Claude Code dùng Haiku chấm các tin mới qua API của bot
+(`/api/labeling/*`, khoá `LABEL_API_TOKEN`). Khi train, các bài trùng tiêu đề được gộp làm 1 và trọng số được
+cân lại giữa các công ty để công ty nhiều tin (VD NVL) không lấn át.
 
 Mỗi đêm 02:30 Bao tự học (scikit-learn, không dùng LLM) từ các lượt chấm này và chỉ dùng mô hình mới nếu nó tốt hơn bản cũ. Quá trình này chạy ngầm, không gửi thông báo vào group.
 
@@ -595,7 +600,7 @@ Mỗi đêm 02:30 Bao tự học (scikit-learn, không dùng LLM) từ các lư�
 
 Chỉ hiện ở tin cảnh báo **khi Bao đã tự học**: `82%` nghĩa là trong 100 tin Bao chấm ~82%, khoảng 82 tin đúng (đã kiểm chứng trên tin Bao chưa từng học). Trước đó không hiện %.
 
-Lệnh nâng cao (ẩn khỏi menu): `/why 1234` (vì sao chấm vậy), `/learn` (độ chính xác), `/fix 1234 pos|neg|neu`, `/commands` (danh sách đầy đủ).
+Lệnh ẩn: `/commands` (danh sách đầy đủ). Admin: `/why 1234`, `/fix 1234 pos|neg|neu`. Train ngay: `POST /api/admin/train` (khoá API).
 
 > Cần ít nhất ~40 bài có nhãn rõ để train lần đầu. Trước đó bot dùng từ khoá (hiện `~%`).
 

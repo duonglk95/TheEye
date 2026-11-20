@@ -6,6 +6,8 @@ HTTP API nhỏ chạy cùng bot (aiohttp) — cho Scheduled Task của Claude Co
        → {"instructions": "...", "articles": [{id, ticker, company, published, title, summary, content}]}
   GET  /api/labeling/pending?relabel=1&days=3650&limit=200&after_id=0
        → chấm lại TẤT CẢ bài (trừ bài người dùng đã chấm), phân trang theo id; "next_after_id" cho trang sau
+  POST /api/admin/train                → chạy tự học ngay, trả báo cáo (độ chính xác, ECE, dữ liệu)
+  GET  /api/admin/unlinked              → bài không gắn công ty (kiểm tra)
   POST /api/labeling/labels
        body {"labeler": "claude-haiku", "labels": [{"id": 123, "label": "POS", "reason": "..."}]}
        → {"saved": n, "unknown_ids": [...], "by_label": {...}, "errors": [...]}
@@ -87,9 +89,16 @@ def build_app(token: str | None) -> web.Application:
             items = [{"id": i, "title": t, "published": p.isoformat()} for i, t, p in rows.all()]
         return web.json_response({"count": len(items), "articles": items})
 
+    async def train(_request):
+        """Chạy 1 vòng tự học ngay (thay cho lệnh trong bot — giao diện Bao chỉ dành cho người dùng cuối)."""
+        from app.learning.trainer import run_learning
+        report = await run_learning()
+        return web.json_response(report, dumps=lambda o: __import__("json").dumps(o, ensure_ascii=False, default=str))
+
     app.router.add_get("/healthz", healthz)
     if token:
         app.router.add_get("/api/admin/unlinked", unlinked)
+        app.router.add_post("/api/admin/train", train)
         app.middlewares.append(auth)
         app.router.add_get("/api/labeling/pending", pending)
         app.router.add_post("/api/labeling/labels", labels)

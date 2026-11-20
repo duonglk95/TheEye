@@ -64,29 +64,3 @@ async def record_feedback(
 
     log.info(f"[feedback] #{article_id}: {previous} → {label} by {username or user_id}")
     return article
-
-
-async def feedback_stats() -> dict:
-    """Số nhãn người dùng đã đóng góp, và tỷ lệ bot đoán đúng trước khi được sửa."""
-    async with AsyncSessionLocal() as session:
-        total = await session.scalar(
-            select(func.count(func.distinct(TrainingLabel.article_id)))
-            .where(TrainingLabel.labeler.like(f"{HUMAN_PREFIX}%"))
-        ) or 0
-        agree = disagree = 0
-        # evidence.human.previous = nhãn bot đã đoán trước khi người dùng xác nhận
-        result = await session.execute(
-            select(ArticleMeta.sentiment, ArticleMeta.sentiment_evidence)
-            .where(ArticleMeta.sentiment_method == "human")
-        )
-        for label, ev in result.all():
-            prev = (ev or {}).get("human", {}).get("previous")
-            if prev is None:
-                continue
-            if prev == label:
-                agree += 1
-            else:
-                disagree += 1
-    judged = agree + disagree
-    return {"total": total, "agree": agree, "disagree": disagree,
-            "bot_accuracy": round(agree / judged, 3) if judged else None}
