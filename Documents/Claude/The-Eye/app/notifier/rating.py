@@ -56,6 +56,22 @@ def ids_from_markup(markup) -> list[int]:
     return ids
 
 
+def merge_rows(top_rows: list[list[dict]], kb: dict | None) -> dict | None:
+    """Ghép các hàng khác (VD hàng chọn thời gian) phía trên hàng nút chấm."""
+    rows = list(top_rows) + (kb["inline_keyboard"] if kb else [])
+    return {"inline_keyboard": rows} if rows else None
+
+
+def non_rating_rows(markup) -> list[list[dict]]:
+    """Các hàng không phải nút chấm trong bàn phím đang hiển thị (giữ lại khi cập nhật số phiếu)."""
+    out = []
+    for row in getattr(markup, "inline_keyboard", None) or []:
+        datas = [getattr(b, "callback_data", "") or "" for b in row]
+        if not any(d.startswith(("r:", "rn:")) for d in datas):
+            out.append([{"text": b.text, "callback_data": b.callback_data} for b in row])
+    return out
+
+
 async def vote_counts(article_ids: list[int]) -> dict[int, dict[int, int]]:
     if not article_ids:
         return {}

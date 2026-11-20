@@ -40,7 +40,7 @@ async def get_all_companies() -> list[Company]:
         return list(result.scalars().all())
 
 
-async def build_company_report(ticker: str, hours: int = 24, numbered: bool = False) -> str:
+async def build_company_report(ticker: str, hours: int = 168, numbered: bool = False) -> str:
     """
     Báo cáo đầy đủ cho 1 công ty.
     Trả về chuỗi đã format HTML cho Telegram.
@@ -80,7 +80,7 @@ async def build_company_report(ticker: str, hours: int = 24, numbered: bool = Fa
             .where(ArticleMeta.published_at >= since)
             .where(ArticleMeta.sentiment == "POS")
             .order_by(ArticleMeta.sentiment_score.desc())
-            .limit(3)
+            .limit(5)
         )
         pos_rows = pos_articles.fetchall()
 
@@ -92,7 +92,7 @@ async def build_company_report(ticker: str, hours: int = 24, numbered: bool = Fa
             .where(ArticleMeta.published_at >= since)
             .where(ArticleMeta.sentiment == "NEG")
             .order_by(ArticleMeta.sentiment_score.desc())
-            .limit(3)
+            .limit(5)
         )
         neg_rows = neg_articles.fetchall()
 
@@ -141,7 +141,7 @@ async def build_company_report(ticker: str, hours: int = 24, numbered: bool = Fa
     return Report("\n".join(lines), ids)
 
 
-async def build_overview_report(hours: int = 24) -> str:
+async def build_overview_report(hours: int = 168) -> str:
     """Báo cáo tổng quan tất cả công ty đang monitor."""
     since = datetime.now(timezone.utc) - timedelta(hours=hours)
     now_str = datetime.now(VN_TZ).strftime("%H:%M %d/%m/%Y")
@@ -184,7 +184,7 @@ async def build_overview_report(hours: int = 24) -> str:
     return "\n".join(lines)
 
 
-async def search_articles(keyword: str, hours: int = 48, limit: int = 8, numbered: bool = False) -> str:
+async def search_articles(keyword: str, hours: int = 168, limit: int = 8, numbered: bool = False) -> str:
     """Tìm kiếm bài báo theo từ khóa trong title hoặc summary."""
     since = datetime.now(timezone.utc) - timedelta(hours=hours)
     label_range = f"{hours}h" if hours < 48 else f"{hours // 24} ngày"
@@ -222,7 +222,7 @@ async def search_articles(keyword: str, hours: int = 48, limit: int = 8, numbere
     return Report("\n".join(lines), [art.id for art, _ in rows])
 
 
-async def build_top_report(sentiment: str, hours: int = 24, limit: int = 5, numbered: bool = False) -> str:
+async def build_top_report(sentiment: str, hours: int = 168, limit: int = 5, numbered: bool = False) -> str:
     """Top POS hoặc NEG across tất cả công ty."""
     since = datetime.now(timezone.utc) - timedelta(hours=hours)
     now_str = datetime.now(VN_TZ).strftime("%H:%M %d/%m/%Y")
