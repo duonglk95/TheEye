@@ -24,3 +24,14 @@ def test_google_suffix_is_stripped():
         "Nafoods ký hợp đồng xuất khẩu chanh leo"
     assert _clean_title("A - B", is_google=True) == "A - B"     # quá ngắn → giữ nguyên
     assert _clean_title("Lãi&nbsp;kỷ lục", is_google=False) == "Lãi kỷ lục"
+
+
+def test_dgc_does_not_match_person_name():
+    import yaml
+    from pathlib import Path
+    cfg = yaml.safe_load((Path(__file__).parent.parent / "config" / "companies.yaml").read_text())
+    companies = [{**c, "db_id": i} for i, c in enumerate(cfg["companies"])]
+    dgc = next(i for i, c in enumerate(cfg["companies"]) if c["ticker"] == "DGC")
+    assert _match_company("Cựu Phó Chủ tịch tỉnh Thanh Hóa Lê Đức Giang lĩnh 3 năm tù", companies) is None
+    assert _match_company("Hóa chất Đức Giang lãi kỷ lục quý 3", companies) == dgc
+    assert _match_company("Cổ phiếu DGC tăng trần", companies) == dgc

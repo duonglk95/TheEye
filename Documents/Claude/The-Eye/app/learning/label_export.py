@@ -41,22 +41,34 @@ def _clean(text: str | None, limit: int | None = None) -> str:
     return t
 
 
-async def fetch_pending(days: int = 7, limit: int = MAX_ARTICLES) -> list[dict]:
-    """Tin trong `days` ngày, chưa có nhãn người chấm / LLM; tin Bao kém chắc nhất lên đầu."""
+async def fetch_pending(
+    days: int = 7, limit: int = MAX_ARTICLES, relabel: bool = False, after_id: int = 0,
+) -> list[dict]:
+    """
+    Chế độ thường: tin trong `days` ngày, chưa có nhãn người chấm / LLM; tin Bao kém chắc nhất lên đầu.
+    relabel=True: chấm lại TẤT CẢ bài (kể cả đã có nhãn LLM; trừ bài người dùng đã chấm),
+                  phân trang theo id tăng dần — truyền after_id = id cuối của trang trước.
+    """
     since = datetime.now(timezone.utc) - timedelta(days=days)
     async with AsyncSessionLocal() as session:
-        labeled = select(TrainingLabel.article_id).where(
-            TrainingLabel.labeler.like(f"{HUMAN_PREFIX}%") | TrainingLabel.labeler.like(f"{LLM_PREFIX}%")
-        )
-        rows = await session.execute(
+        if relabel:
+            excluded = select(TrainingLabel.article_id).where(TrainingLabel.labeler.like(f"{HUMAN_PREFIX}%"))
+            order = (ArticleMeta.id.asc(),)
+        else:
+            excluded = select(TrainingLabel.article_id).where(
+                TrainingLabel.labeler.like(f"{HUMAN_PREFIX}%") | TrainingLabel.labeler.like(f"{LLM_PREFIX}%")
+            )
+            order = (func.coalesce(ArticleMeta.sentiment_score, 0).asc(), ArticleMeta.published_at.desc())
+        query = (
             select(ArticleMeta, Company, func.left(ArticleContent.content_raw, CONTENT_EXCERPT + 200))
             .join(Company, ArticleMeta.company_id == Company.id)
             .outerjoin(ArticleContent, ArticleContent.article_id == ArticleMeta.id)
             .where(ArticleMeta.published_at >= since)
-            .where(ArticleMeta.id.not_in(labeled))
-            .order_by(func.coalesce(ArticleMeta.sentiment_score, 0).asc(), ArticleMeta.published_at.desc())
-            .limit(limit)
+            .where(ArticleMeta.id.not_in(excluded))
         )
+        if relabel and after_id:
+            query = query.where(ArticleMeta.id > after_id)
+        rows = await session.execute(query.order_by(*order).limit(limit))
         return [
             {
                 "id": art.id,
@@ -90,7 +102,10 @@ def validate_labels(items) -> tuple[dict[int, str], list[str]]:
 
 
 async def import_labels(labels: dict[int, str], labeler: str = DEFAULT_LLM_LABELER) -> dict:
-    """Lưu nhãn LLM. Bỏ qua id không tồn tại. Gửi lại cùng bài → ghi đè nhãn cũ của labeler đó."""
+    """
+    Lưu nhãn LLM (training_labels) VÀ cập nhật nhãn hiển thị của bài (method="llm"),
+    trừ bài người dùng đã chấm. Bỏ qua id không tồn tại. Gửi lại cùng bài → ghi đè.
+    """
     if not labeler.startswith(LLM_PREFIX):
         labeler = LLM_PREFIX + labeler
     labeler = labeler[:50]
@@ -98,12 +113,25 @@ async def import_labels(labels: dict[int, str], labeler: str = DEFAULT_LLM_LABEL
         return {"saved": 0, "unknown_ids": [], "by_label": {}}
     now = datetime.now(timezone.utc)
     async with AsyncSessionLocal() as session:
-        existing = set((await session.scalars(
-            select(ArticleMeta.id).where(ArticleMeta.id.in_(list(labels)))
-        )).all())
+        articles = {a.id: a for a in (await session.scalars(
+            select(ArticleMeta).where(ArticleMeta.id.in_(list(labels)))
+        )).all()}
+        existing = set(articles)
         by_label: dict[str, int] = {}
+        changed = 0
         for aid in existing:
             label = labels[aid]
+            art = articles[aid]
+            if art.sentiment_method != "human":
+                if art.sentiment != label:
+                    changed += 1
+                evidence = dict(art.sentiment_evidence or {})
+                evidence["llm"] = {"by": labeler, "previous": art.sentiment, "previous_method": art.sentiment_method}
+                art.sentiment = label
+                art.sentiment_score = 0.8
+                art.sentiment_method = "llm"
+                art.sentiment_evidence = evidence
+                art.classified_at = now
             stmt = pg_insert(TrainingLabel).values(
                 article_id=aid, label=label, labeler=labeler, confidence=0.8, created_at=now,
             )
@@ -112,4 +140,5 @@ async def import_labels(labels: dict[int, str], labeler: str = DEFAULT_LLM_LABEL
             ))
             by_label[label] = by_label.get(label, 0) + 1
         await session.commit()
-    return {"saved": len(existing), "unknown_ids": sorted(set(labels) - existing), "by_label": by_label}
+    return {"saved": len(existing), "changed": changed, "unknown_ids": sorted(set(labels) - existing),
+            "by_label": by_label}

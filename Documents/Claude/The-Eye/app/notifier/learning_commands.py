@@ -144,6 +144,10 @@ async def explain_article(article_id: int) -> str:
             lines.append(f"<i>Trước đó bot đoán {ICON.get(prev, '')} {NAME_SHORT.get(prev, prev)} → {verdict}</i>")
         return "\n".join(lines)
 
+    if method == "llm":
+        lines.append(f"{ICON[label]} <b>{NAME_SHORT[label]}</b> · do Claude đọc và chấm")
+        return "\n".join(lines)
+
     depth = "đã đọc toàn bài" if art.read_depth == "full" else "mới đọc tiêu đề + sapo"
     engine = f"mô hình tự học {method.split('+')[0].replace('ml_', '')}" if method.startswith("ml_") else "từ khoá"
     lines.append(f"{ICON[label]} <b>{NAME_SHORT[label]} · {conf}</b>")
