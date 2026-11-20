@@ -1,0 +1,90 @@
+"""
+Phản hồi của người dùng — "giáo viên" chính của bot.
+
+Mỗi lần ai đó bấm nút ✅/🟢/🔴/⚪ dưới tin hoặc gõ /fix:
+  - Lưu vào training_labels với labeler = "human:<telegram_user_id>"
+  - Cập nhật luôn nhãn của bài (method = "human", không bị mô hình ghi đè)
+Lần train kế tiếp, các nhãn này có trọng số cao nhất và là thước đo chính để
+đánh giá mô hình mới có giỏi hơn mô hình cũ không.
+"""
+import logging
+from datetime import datetime, timezone
+
+from sqlalchemy import func, select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
+
+from app.db import AsyncSessionLocal
+from app.db.models import ArticleMeta, TrainingLabel
+
+log = logging.getLogger(__name__)
+
+HUMAN_PREFIX = "human:"
+VALID = {"POS", "NEG", "NEU"}
+
+
+async def record_feedback(article_id: int, label: str, user_id: int, username: str | None = None) -> ArticleMeta | None:
+    """Ghi nhận nhãn đúng cho 1 bài. Trả về bài (đã cập nhật) hoặc None nếu không có bài."""
+    label = label.upper()
+    if label not in VALID:
+        raise ValueError(f"Nhãn không hợp lệ: {label}")
+
+    now = datetime.now(timezone.utc)
+    async with AsyncSessionLocal() as session:
+        article = await session.get(ArticleMeta, article_id)
+        if article is None:
+            return None
+
+        stmt = pg_insert(TrainingLabel).values(
+            article_id=article_id, label=label, labeler=f"{HUMAN_PREFIX}{user_id}",
+            confidence=1.0, created_at=now,
+        )
+        await session.execute(stmt.on_conflict_do_update(
+            index_elements=["article_id", "labeler"],
+            set_={"label": label, "created_at": now},
+        ))
+
+        evidence = dict(article.sentiment_evidence or {})
+        if article.sentiment_method == "human" and "human" in evidence:
+            # Đã có người xác nhận trước đó → giữ nguyên nhãn gốc bot đoán
+            previous = evidence["human"].get("previous")
+            evidence["human"] = {**evidence["human"], "by": username or str(user_id)}
+        else:
+            previous = article.sentiment
+            evidence["human"] = {"by": username or str(user_id), "previous": previous,
+                                 "previous_method": article.sentiment_method,
+                                 "previous_score": article.sentiment_score}
+        article.sentiment = label
+        article.sentiment_score = 1.0
+        article.sentiment_method = "human"
+        article.sentiment_evidence = evidence
+        article.classified_at = now
+        await session.commit()
+
+    log.info(f"[feedback] #{article_id}: {previous} → {label} by {username or user_id}")
+    return article
+
+
+async def feedback_stats() -> dict:
+    """Số nhãn người dùng đã đóng góp, và tỷ lệ bot đoán đúng trước khi được sửa."""
+    async with AsyncSessionLocal() as session:
+        total = await session.scalar(
+            select(func.count(func.distinct(TrainingLabel.article_id)))
+            .where(TrainingLabel.labeler.like(f"{HUMAN_PREFIX}%"))
+        ) or 0
+        agree = disagree = 0
+        # evidence.human.previous = nhãn bot đã đoán trước khi người dùng xác nhận
+        result = await session.execute(
+            select(ArticleMeta.sentiment, ArticleMeta.sentiment_evidence)
+            .where(ArticleMeta.sentiment_method == "human")
+        )
+        for label, ev in result.all():
+            prev = (ev or {}).get("human", {}).get("previous")
+            if prev is None:
+                continue
+            if prev == label:
+                agree += 1
+            else:
+                disagree += 1
+    judged = agree + disagree
+    return {"total": total, "agree": agree, "disagree": disagree,
+            "bot_accuracy": round(agree / judged, 3) if judged else None}

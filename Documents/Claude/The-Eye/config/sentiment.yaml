@@ -1,8 +1,8 @@
 # Sentiment classification config
 # Cập nhật version và model_path sau mỗi lần train PhoBERT (Phase 2)
 
-version: "rule_v2"
-updated_at: "2026-05-31"
+version: "rule_v3"
+updated_at: "2026-11-20"
 
 # Sau Phase 2, điền đường dẫn model vào đây để tự động dùng PhoBERT
 model_path: null
@@ -74,6 +74,17 @@ positive:
     - "đạt lợi nhuận"
     - "kinh doanh có lãi"
     - "lãi đậm"
+    # Khen thưởng / vinh danh — thường tiêu đề không có từ "tăng/lãi" nhưng là tin tốt
+    - "huân chương lao động"
+    - "huân chương"
+    - "bằng khen"
+    - "cờ thi đua"
+    - "vinh danh"
+    - "được vinh danh"
+    - "thương hiệu quốc gia"
+    - "anh hùng lao động"
+    - "giải thưởng"
+    - "đạt giải"
   weak:     # Có thể POS, weight 0.4
     - "tăng vốn"
     - "phát hành cổ phiếu"
@@ -93,6 +104,10 @@ positive:
     - "cải thiện"
     - "tăng trưởng"
     - "tốt hơn kỳ vọng"
+    - "ghi nhận đóng góp"
+    - "vinh dự"
+    - "tự hào"
+    - "uy tín"
 
 negative:
   strong:   # Chắc chắn NEG, weight 1.0

@@ -70,6 +70,9 @@ async def scrape_article(article_id: int) -> bool:
         content_html = None
 
         try:
+            if "news.google.com" in article.url:
+                # Link Google News là trang chuyển hướng bằng JS — không lấy được nội dung thật
+                raise ValueError("google_news_redirect: không scrape được")
             async with httpx.AsyncClient() as client:
                 resp = await client.get(
                     article.url, headers=HEADERS, timeout=20, follow_redirects=True
@@ -111,6 +114,7 @@ async def scrape_pending(limit: int = 20):
             select(ArticleMeta.id)
             .outerjoin(ArticleContent, ArticleMeta.id == ArticleContent.article_id)
             .where(ArticleContent.article_id == None)  # noqa: E711
+            .where(~ArticleMeta.url.contains("news.google.com"))
             .order_by(ArticleMeta.published_at.desc())
             .limit(limit)
         )

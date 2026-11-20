@@ -1,7 +1,7 @@
 from datetime import datetime
 from sqlalchemy import (
     BigInteger, Boolean, Column, Date, Float, ForeignKey,
-    Integer, String, Text, TIMESTAMP, ARRAY, UniqueConstraint
+    Integer, LargeBinary, String, Text, TIMESTAMP, ARRAY, UniqueConstraint
 )
 from sqlalchemy.orm import DeclarativeBase, relationship
 from sqlalchemy.dialects.postgresql import JSONB
@@ -64,6 +64,8 @@ class ArticleMeta(Base):
     sentiment_score = Column(Float)
     sentiment_method = Column(String(30))   # rule_v1 | phobert_v1 | ...
     classified_at = Column(TIMESTAMP(timezone=True))
+    sentiment_evidence = Column(JSONB)      # {"phrases": [...], "probs": {...}, "calibrated": bool}
+    read_depth = Column(String(10))         # headline (tiêu đề+sapo) | full (đã đọc thân bài)
 
     # Notification
     notified = Column(Boolean, default=False)
@@ -150,3 +152,19 @@ class Subscriber(Base):
 # CREATE INDEX idx_article_meta_sentiment     ON article_meta(sentiment, published_at DESC);
 # CREATE INDEX idx_stock_daily_ticker_date    ON stock_daily(ticker, date);
 # CREATE UNIQUE INDEX uq_stock_daily          ON stock_daily(ticker, date);
+
+
+class MLModel(Base):
+    """Mô hình ML đã train — lưu trong DB vì filesystem Railway bị xoá mỗi lần deploy."""
+    __tablename__ = "ml_models"
+
+    id         = Column(Integer, primary_key=True)
+    version    = Column(Integer, unique=True, nullable=False)
+    status     = Column(String(20), nullable=False)   # active | rejected | retired
+    algo       = Column(String(50), nullable=False)
+    n_train    = Column(Integer)
+    n_gold     = Column(Integer)
+    metrics    = Column(JSONB)
+    blob       = Column(LargeBinary)
+    note       = Column(Text)
+    created_at = Column(TIMESTAMP(timezone=True), default=datetime.utcnow)
