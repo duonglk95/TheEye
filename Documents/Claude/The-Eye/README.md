@@ -29,23 +29,18 @@
 **The-Eye** là một chương trình tự động:
 
 - 🔍 **Quét tin tức** từ CafeF, Vietstock, VnExpress, Google News mỗi 5 phút
-- 🏷️ **Phân loại tự động** mỗi bài báo thành 3 nhóm:
+- 📖 **Đọc cả thân bài** (không chỉ tiêu đề) và **phân loại** mỗi bài thành 3 nhóm:
   - 🟢 **Tích cực (POS)** — tin tốt cho doanh nghiệp
   - 🔴 **Tiêu cực (NEG)** — tin xấu, rủi ro
   - ⚪ **Trung lập (NEU)** — thông báo, thông tin thường
-- 📱 **Gửi cảnh báo Telegram** ngay khi có tin tích cực/tiêu cực quan trọng
-- 📊 **Tổng hợp báo cáo** gửi vào group Telegram mỗi 2 tiếng
-- 💬 **Trả lời lệnh** khi bạn hoặc bạn bè hỏi trong group Telegram
+- 🧠 **Tự học mỗi đêm** (mô hình máy học nhẹ, không dùng LLM trên server) — xem [mục 12b](#12b-bao-tự-học--đọc-toàn-bài--ý-nghĩa-con-số-)
+- 📱 **Gửi cảnh báo Telegram ngay** khi có tin xấu; tin tốt gom vào **bản tin 2 tiếng/lần** (8h–22h)
+- 👆 **Dùng bằng nút bấm** — người dùng không cần gõ lệnh
 
-**5 công ty đang theo dõi:**
+Bot trên Telegram tên là **Bao**.
 
-| Mã CK | Tên công ty |
-|-------|-------------|
-| SBT | TTC AgriS (Thành Thành Công - Biên Hòa) |
-| DGC | Hóa chất Đức Giang |
-| NAF | Nafoods Group |
-| VIC | Vingroup |
-| CTD | Coteccons |
+**Công ty đang theo dõi:** danh sách nằm trong cơ sở dữ liệu (thêm qua `config/companies.yaml`, xem mục 11).
+Hiện gồm SBT (TTC AgriS), DGC (Hóa chất Đức Giang), NAF (Nafoods), VIC (Vingroup), CTD (Coteccons), NVL (Novaland).
 
 ---
 
@@ -53,20 +48,18 @@
 
 ```
 Mỗi 5 phút:
-  CafeF ──┐
-Vietstock ─┼──► Lọc tin liên quan ──► Phân loại ──► Lưu vào cơ sở dữ liệu
-VnExpress ─┘       (theo công ty)      POS/NEG/NEU
-Google News ─┘
+  CafeF / Vietstock / VnExpress / Google News
+      └─► Lọc tin theo công ty ─► Phân loại nhanh (tiêu đề + sapo) ─► Lưu DB
+                                         │
+                                         ├─ 🔴 Tiêu cực → gửi NGAY vào Telegram
+                                         └─ 🟢 Tích cực → vào bản tin 2 tiếng/lần (8h–22h)
+Mỗi 10 phút:
+  Tải thân bài ─► Đọc lại toàn bài ─► đổi nhãn nếu thân bài khác tiêu đề (thành 🔴 → báo ngay)
 
-                                            │
-                              ┌─────────────┴──────────────┐
-                              ▼                            ▼
-                    Tin POS/NEG?              Mỗi 2 tiếng (8h–22h):
-                    → Gửi NGAY               → Gửi bản tóm tắt
-                      vào Telegram             vào Telegram
+T2–T6, 04:55:  Claude Haiku (Scheduled Task, dùng gói Claude) chấm nhãn các tin mới qua API của bot
+Mỗi đêm 02:30: Bao tự học từ các nhãn đó → chỉ dùng mô hình mới nếu tốt hơn bản cũ
 
-Khi bạn nhắn lệnh trong group:
-  /report VIC  ──► Tổng hợp tin VIC 24h ──► Gửi lại vào group
+Người dùng chạm nút 📊 VIC ─► Báo cáo tin VIC 24h
 ```
 
 ---
@@ -317,7 +310,18 @@ Khi chạy `python main.py --demo` hoặc `--tui`, bạn thấy màn hình như 
 
 ## 9. Lệnh Telegram Bot trong group
 
-Sau khi đã thêm bot vào group, bạn hoặc bạn bè có thể gõ các lệnh sau:
+**Cách dùng đơn giản nhất: bàn phím nút.** Bấm **Start** (chat riêng) hoặc gõ `/menu` một lần (group), bàn phím
+gõ chữ được thay bằng các nút luôn hiện sẵn:
+
+```
+📊 SBT   📊 DGC   📊 NAF
+📊 VIC   📊 CTD   📊 NVL
+📋 Tổng quan  🟢 Tin tốt  🔴 Tin xấu
+🔔 Bật thông báo        (chỉ trong chat riêng)
+```
+
+Chạm 1 nút là ra báo cáo 24h. Menu lệnh của Telegram chỉ còn `/menu` và `/report`; các lệnh dưới đây vẫn dùng được
+nhưng ẩn (gõ `/commands` để xem đủ):
 
 ---
 
@@ -432,7 +436,7 @@ Dùng /report TICKER để xem chi tiết
 
 ---
 
-### `/help` — Xem tất cả lệnh
+### `/help` (hoặc `/menu`) — Hiện bàn phím nút
 
 ```
 /help
@@ -479,6 +483,15 @@ railway variables set ENVIRONMENT=production
 
 > 💡 `DATABASE_URL` Railway tự thêm vì database cùng project
 
+Biến tuỳ chọn:
+
+| Biến | Dùng để |
+|------|---------|
+| `LABEL_API_TOKEN` | Khoá bảo vệ API chấm nhãn (`/api/...`). Không đặt → API tắt. Đặt bằng giao diện Railway, **không** dán vào chat. |
+| `ADMIN_USER_IDS` | Telegram user id của admin (phân cách dấu phẩy). Không đặt → admin là `TELEGRAM_CHAT_ID` nếu đó là chat riêng. Lấy id qua @userinfobot. |
+
+Để Scheduled Task gọi được API: Railway → service → Settings → Networking → **Generate Domain** (cổng 8080).
+
 ### Bước 5 — Deploy
 
 ```bash
@@ -493,7 +506,12 @@ railway up
 railway logs
 ```
 
-> ✅ Nếu thấy "Scheduler started." và "Telegram Bot: polling started" là hệ thống đang chạy 24/7.
+> ✅ Nếu thấy "Migrations applied", "Scheduler started.", "[bot] Polling started" và
+> "[api] listening on :8080 — labeling API ON" là hệ thống đang chạy 24/7.
+>
+> Khi khởi động, bot tự: tạo/cập nhật bảng (migrations), đồng bộ `companies.yaml` vào DB, gỡ các bài không còn
+> khớp từ khoá công ty, và nạp mô hình tự học mới nhất. Lỗi `409 Conflict` vài giây ngay sau deploy là bình thường
+> (bản cũ chưa tắt hẳn).
 
 ---
 
@@ -527,10 +545,14 @@ Tìm công ty cần tạm dừng, đổi `active: true` thành `active: false`.
 
 ### Cập nhật vào hệ thống
 
-Sau khi lưu file, chạy:
-```bash
-python scripts/run_seed.py
-```
+Đẩy file lên GitHub và deploy — bot **tự đồng bộ** `companies.yaml` vào cơ sở dữ liệu khi khởi động
+(chạy tay: `python scripts/run_seed.py`).
+
+> 💡 Danh sách công ty theo dõi lấy từ **cơ sở dữ liệu**. Công ty có trong DB nhưng không có trong YAML vẫn được
+> theo dõi; muốn dừng hẳn thì đặt `active: false` trong YAML (hoặc trong DB).
+>
+> ⚠️ Từ khoá nên cụ thể: tránh từ trùng tên người/địa danh (VD đã bỏ `Đức Giang` trần vì khớp nhầm ông Lê Đức Giang)
+> và mã ngắn dễ nằm trong từ khác. Từ khoá được so theo **ranh giới từ** (`VIC` không khớp `VICEM`).
 
 ---
 
@@ -570,39 +592,76 @@ negative:
 
 ### Bao đọc tin thế nào?
 
-1. **Đọc nhanh** (ngay khi lấy RSS): chỉ tiêu đề + sapo.
-2. **Đọc toàn bài** (10 phút sau, khi đã tải được nội dung): chấm từng câu trong thân bài.
-   Tin kiểu *"AgriS nhận Huân chương Lao động"* — tiêu đề không có chữ "tăng/lãi", nhưng thân bài toàn câu tích cực — sẽ được chuyển ⚪ → 🟢.
-   Nếu đọc toàn bài thấy 🔴, bot gửi cảnh báo ngay.
+1. **Đọc nhanh** (ngay khi lấy RSS): tiêu đề + sapo.
+2. **Đọc toàn bài** (≤10 phút sau, khi đã tải được nội dung): chấm từng câu trong thân bài.
+   Tin kiểu *"AgriS nhận Huân chương Lao động"* — tiêu đề không có chữ "tăng/lãi" nhưng thân bài toàn tin tốt — được
+   chuyển ⚪ → 🟢. Nếu đọc toàn bài thấy 🔴, bot gửi cảnh báo ngay.
    *(Bài từ Google News không tải được nội dung vì link là trang chuyển hướng — chỉ đọc tiêu đề.)*
 
-### Dùng bot không cần gõ lệnh
+### Bao tự học thế nào?
 
-Bấm **Start** (hoặc gõ `/menu` một lần), bàn phím gõ chữ được thay bằng các nút luôn hiện sẵn:
-`📊 SBT` `📊 DGC` `📊 NAF` `📊 VIC` `📊 CTD` · `📋 Tổng quan` `🟢 Tin tốt` `🔴 Tin xấu` · `🔔 Bật/🔕 Tắt thông báo` (chat riêng).
-Chạm 1 nút là ra báo cáo 24h.
+```
+Nhãn đúng  ──►  Gộp tin trùng + cân bằng công ty  ──►  Train (02:30 mỗi đêm)  ──►  Kiểm định  ──►  Dùng nếu tốt hơn
+```
 
-> Trong group: cần tắt Privacy Mode (BotFather → `/setprivacy` → Disable) để bot thấy nút được chạm.
+**Nguồn nhãn** (theo độ tin cậy):
 
-### Dạy Bao (chỉ admin)
+| Nguồn | Trọng số | Ghi chú |
+|-------|---------|---------|
+| 👤 Admin chấm tay | 3.0 | Nút 🔴/⚪/🟢 trong chat riêng với Bao, hoặc `/fix` |
+| 🤖 Claude Haiku | 1.5 | Scheduled Task T2–T6 04:55, chạy bằng gói Claude (không tốn API credits) |
+| 📏 Luật từ khoá đọc toàn bài | 1.0 | Chỉ khi bằng chứng rất rõ |
 
-Giao diện Bao dành cho người dùng cuối: không có nút chấm, không có thông tin training.
-**Admin** (chủ bot — `ADMIN_USER_IDS`, mặc định là `TELEGRAM_CHAT_ID` nếu đó là chat riêng) khi xem tin trong
-chat riêng với Bao sẽ thấy thêm hàng nút **🔴 Xấu · ⚪ Thường · 🟢 Tốt** dưới mỗi tin; có thêm lệnh ẩn `/fix`, `/why`.
+**Mô hình:** TF-IDF + Logistic Regression (scikit-learn) — chạy CPU, ~100MB RAM, train vài giây; lưu trong Postgres.
+Không dùng PhoBERT/LLM trên server để giữ chi phí Railway thấp nhất.
 
-Hằng ngày (T2–T6, 04:55) một Scheduled Task của Claude Code dùng Haiku chấm các tin mới qua API của bot
-(`/api/labeling/*`, khoá `LABEL_API_TOKEN`). Khi train, các bài trùng tiêu đề được gộp làm 1 và trọng số được
-cân lại giữa các công ty để công ty nhiều tin (VD NVL) không lấn át.
+**Chống lệch dữ liệu:**
+- **Gộp tin trùng:** cùng tiêu đề (đăng lại ở nhiều báo) → tính là 1 mẫu.
+- **Cân bằng công ty:** trọng số × √(trung bình số tin mỗi công ty / số tin của công ty đó), kẹp 0.33–3.
+  VD hiện tại NVL (~65% dữ liệu) ×0.56, VIC (ít tin) ×3.
+- **Cổng kiểm định:** ~20% tin cố định để kiểm tra, mô hình chưa từng học. Mô hình mới chỉ được dùng nếu điểm
+  (macro-F1) ≥ mô hình đang chạy trên **cùng** tập kiểm tra.
 
-Mỗi đêm 02:30 Bao tự học (scikit-learn, không dùng LLM) từ các lượt chấm này và chỉ dùng mô hình mới nếu nó tốt hơn bản cũ. Quá trình này chạy ngầm, không gửi thông báo vào group.
+**Quy ước chấm** (Claude và admin cùng theo, để nhãn nhất quán):
+
+| Loại tin | Nhãn |
+|---------|------|
+| Biến động giá, khối ngoại mua/bán, tăng trần/nằm sàn | ⚪ (trừ khi bài nêu rõ nguyên nhân là sự kiện của công ty) |
+| Chuyển đổi trái phiếu, hoán đổi/tái cấu trúc nợ | ⚪ (🔴 nếu nêu rõ chậm trả / không trả được nợ) |
+| Lùi hạn/huỷ chào bán, chậm công bố BCTC, bị cảnh báo/kiểm soát | 🔴 |
+| Bác bỏ tin đồn, đính chính, xử lý tin giả | ⚪ |
+| Giao dịch nội bộ, cổ đông lớn | ⚪ (🔴 nếu lãnh đạo bán gần hết) |
+| Cùng sự kiện đăng lại nhiều báo | Chấm giống nhau |
+
+Sửa quy ước: `INSTRUCTIONS` trong `app/learning/label_export.py`.
 
 ### Con số %
 
-Chỉ hiện ở tin cảnh báo **khi Bao đã tự học**: `82%` nghĩa là trong 100 tin Bao chấm ~82%, khoảng 82 tin đúng (đã kiểm chứng trên tin Bao chưa từng học). Trước đó không hiện %.
+Chỉ hiện ở tin cảnh báo khi đang dùng **mô hình tự học**: `82%` nghĩa là trong 100 tin Bao chấm ~82%, khoảng 82 tin
+đúng — đã kiểm chứng trên tin Bao chưa từng học (hiệu chỉnh bằng *temperature scaling*). Không bao giờ hiện 100%.
+Khi chưa có mô hình (chỉ dùng từ khoá) thì không hiện %.
 
-Lệnh ẩn: `/commands` (danh sách đầy đủ). Admin: `/why 1234`, `/fix 1234 pos|neg|neu`. Train ngay: `POST /api/admin/train` (khoá API).
+*Kết quả 20/11/2026 (sau khi Claude chấm lại toàn bộ ~1.500 tin):* đúng 80% trên 226 tin kiểm tra; khi bot nói
+90–100% thì đúng 98%, nói 80–90% thì đúng 84%. Điểm yếu: tin 🔴 (ít mẫu) — sẽ tốt dần khi có thêm nhãn.
 
-> Cần ít nhất ~40 bài có nhãn rõ để train lần đầu. Trước đó bot dùng từ khoá (hiện `~%`).
+### Admin
+
+Giao diện Bao dành cho **người dùng cuối**: không có nút chấm, không có thông tin training.
+**Admin** (xem `ADMIN_USER_IDS`, mục 10) khi xem tin **trong chat riêng** với Bao sẽ thấy thêm hàng nút
+🔴 Xấu · ⚪ Thường · 🟢 Tốt dưới mỗi tin, và dùng được `/fix 1234 pos|neg|neu`, `/why 1234`.
+
+**API quản trị** (header `Authorization: Bearer $LABEL_API_TOKEN`):
+
+| Endpoint | Tác dụng |
+|----------|---------|
+| `GET /api/labeling/pending?days=7&limit=150` | Tin chưa có nhãn + hướng dẫn chấm (Scheduled Task dùng) |
+| `GET /api/labeling/pending?relabel=1&days=3650&limit=200&after_id=N` | Lấy **tất cả** tin theo trang để chấm lại |
+| `POST /api/labeling/labels` | Gửi nhãn `{"labeler": "...", "labels": [{"id", "label", "reason"}]}` |
+| `POST /api/admin/train` | Train ngay, trả báo cáo độ chính xác |
+| `GET /api/admin/unlinked` | Tin không gắn công ty nào (kiểm tra từ khoá) |
+
+> Đổi `LABEL_API_TOKEN` trên Railway thì phải cập nhật khoá tương ứng trong môi trường Claude Code chạy
+> Scheduled Task, nếu không task chấm nhãn sẽ lỗi 401.
 
 ---
 
@@ -648,16 +707,18 @@ CronTrigger(hour="8,10,12,14,16,18,20,22", minute=0)
 
 ---
 
-**❓ Muốn nhận thông báo về cả tin trung lập (NEU)?**
+**❓ Tin nào được gửi ngay, tin nào vào bản tin?**
 
-→ Mở `app/collector/scheduler.py`, tìm dòng:
-```python
-urgent = [aid for aid, label in results.items() if label in ("POS", "NEG")]
-```
-→ Sửa thành:
-```python
-urgent = [aid for aid, label in results.items() if label in ("POS", "NEG", "NEU")]
-```
+→ 🔴 tiêu cực: gửi ngay (`job_poll_and_classify` và `job_scrape_and_deep_read` trong `app/collector/scheduler.py`).
+→ 🟢 tích cực: gom vào bản tin 2 tiếng/lần (`send_digest` trong `app/notifier/telegram.py`).
+→ ⚪ trung lập: không gửi, chỉ xem qua nút 📊 / báo cáo.
+
+---
+
+**❓ Một công ty bị lẫn tin không liên quan?**
+
+→ Từ khoá quá chung (VD tên trùng tên người). Sửa `keywords` trong `config/companies.yaml` rồi deploy — bot tự
+gỡ các bài cũ không còn khớp. Xem các bài đã gỡ: `GET /api/admin/unlinked`.
 
 ---
 
@@ -686,4 +747,4 @@ Nếu gặp vấn đề không giải quyết được, cung cấp:
 ---
 
 *👁 The-Eye — News Intelligence Monitor*
-*Phiên bản hiện tại: Phase 2 (RSS + đọc toàn bài + ML tự học có hiệu chỉnh + Telegram Bot)*
+*Phiên bản hiện tại: Phase 2 (RSS + đọc toàn bài + ML tự học có hiệu chỉnh + Claude chấm nhãn hằng ngày + Telegram Bot dạng nút bấm)*
