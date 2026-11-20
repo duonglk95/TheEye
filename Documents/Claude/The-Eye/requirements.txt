@@ -26,6 +26,9 @@ joblib==1.4.2
 # Notification
 python-telegram-bot==21.9
 
+# API nhỏ cho Scheduled Task chấm nhãn hằng tuần
+aiohttp==3.10.10
+
 # TUI
 textual==0.89.1
 

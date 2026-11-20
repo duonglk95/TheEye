@@ -219,7 +219,7 @@ async def learning_status() -> str:
         m = bundle.metrics
         src = m.get("sources", {})
         lines.append(f"Mô hình <b>v{bundle.version}</b> · học từ {m.get('n_train', 0)} bài "
-                     f"<i>(👤 {src.get('gold', 0)} xác nhận · 📏 {src.get('silver', 0)} từ khoá · 🔁 {src.get('pseudo', 0)} tự gán)</i>")
+                     f"<i>(👤 {src.get('gold', 0)} xác nhận · 🤖 {src.get('llm', 0)} Claude · 📏 {src.get('silver', 0)} từ khoá · 🔁 {src.get('pseudo', 0)} tự gán)</i>")
         lines.append("")
         if "val_gold" in m:
             lines += _metrics_block(m["val_gold"], "người dùng xác nhận")

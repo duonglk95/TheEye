@@ -170,10 +170,20 @@ async def start_scheduler():
     await start_polling(bot_app)
     log.info("  - Telegram Bot:         polling started")
 
+    # API nhỏ cho Scheduled Task của Claude Code chấm nhãn hằng tuần (bot không gọi LLM)
+    from app.web.api import start_api
+    try:
+        api_runner = await start_api()
+    except Exception as e:      # API lỗi không được làm sập bot
+        log.error(f"[api] không khởi động được: {e}")
+        api_runner = None
+
     try:
         while True:
             await asyncio.sleep(3600)
     except (KeyboardInterrupt, SystemExit):
         scheduler.shutdown()
         await stop_polling(bot_app)
+        if api_runner:
+            await api_runner.cleanup()
         log.info("Scheduler + Bot stopped.")

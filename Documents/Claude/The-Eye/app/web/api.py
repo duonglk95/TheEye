@@ -1,0 +1,84 @@
+"""
+HTTP API nhỏ chạy cùng bot (aiohttp) — cho Scheduled Task của Claude Code chấm nhãn hằng tuần.
+
+  GET  /healthz                         → "ok" (không cần khoá)
+  GET  /api/labeling/pending?days=7&limit=150
+       → {"instructions": "...", "articles": [{id, ticker, company, published, title, summary, content}]}
+  POST /api/labeling/labels
+       body {"labeler": "claude-haiku", "labels": [{"id": 123, "label": "POS", "reason": "..."}]}
+       → {"saved": n, "unknown_ids": [...], "by_label": {...}, "errors": [...]}
+
+Bảo vệ: header  Authorization: Bearer <LABEL_API_TOKEN>  (biến môi trường trên Railway).
+Không đặt LABEL_API_TOKEN → API không được bật (chỉ /healthz).
+"""
+import hmac
+import logging
+import os
+
+from aiohttp import web
+
+from app.learning.label_export import INSTRUCTIONS, fetch_pending, import_labels, validate_labels
+
+log = logging.getLogger(__name__)
+MAX_BODY = 2 * 1024 * 1024
+
+
+def is_authorized(header: str | None, token: str | None) -> bool:
+    if not token or not header or not header.startswith("Bearer "):
+        return False
+    return hmac.compare_digest(header[len("Bearer "):].strip().encode(), token.encode())
+
+
+def _int(value, default: int, lo: int, hi: int) -> int:
+    try:
+        return max(lo, min(hi, int(value)))
+    except (TypeError, ValueError):
+        return default
+
+
+def build_app(token: str | None) -> web.Application:
+    app = web.Application(client_max_size=MAX_BODY)
+
+    async def healthz(_request):
+        return web.Response(text="ok")
+
+    @web.middleware
+    async def auth(request, handler):
+        if request.path.startswith("/api/") and not is_authorized(request.headers.get("Authorization"), token):
+            return web.json_response({"error": "unauthorized"}, status=401)
+        return await handler(request)
+
+    async def pending(request):
+        days = _int(request.query.get("days"), 7, 1, 60)
+        limit = _int(request.query.get("limit"), 150, 1, 500)
+        articles = await fetch_pending(days, limit)
+        return web.json_response({"instructions": INSTRUCTIONS, "count": len(articles), "articles": articles})
+
+    async def labels(request):
+        try:
+            body = await request.json()
+        except Exception:
+            return web.json_response({"error": "body phải là JSON"}, status=400)
+        parsed, errors = validate_labels(body.get("labels") if isinstance(body, dict) else None)
+        labeler = str((body or {}).get("labeler") or "claude-task")
+        result = await import_labels(parsed, labeler=labeler)
+        log.info(f"[labeling-api] {labeler}: saved {result['saved']} {result['by_label']}, errors {len(errors)}")
+        return web.json_response({**result, "errors": errors[:50]})
+
+    app.router.add_get("/healthz", healthz)
+    if token:
+        app.middlewares.append(auth)
+        app.router.add_get("/api/labeling/pending", pending)
+        app.router.add_post("/api/labeling/labels", labels)
+    return app
+
+
+async def start_api() -> web.AppRunner | None:
+    """Khởi động server trên $PORT (Railway cấp). Trả về runner để dừng khi tắt."""
+    token = os.environ.get("LABEL_API_TOKEN")
+    port = int(os.environ.get("PORT", "8080"))
+    runner = web.AppRunner(build_app(token), access_log=None)
+    await runner.setup()
+    await web.TCPSite(runner, "0.0.0.0", port).start()
+    log.info(f"[api] listening on :{port} — labeling API {'ON' if token else 'OFF (chưa đặt LABEL_API_TOKEN)'}")
+    return runner
