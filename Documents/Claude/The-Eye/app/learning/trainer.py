@@ -226,8 +226,11 @@ def dedupe_and_balance(samples: list[Sample]) -> tuple[list[Sample], dict]:
     merged = [m for m in merged if not (m.source == "pseudo" and ml_model.is_validation(m.article_id))]
 
     per_group = Counter(m.group or "_none" for m in merged)
-    mean = len(merged) / max(len(per_group), 1)
-    factor = {g: min(BALANCE_MAX, max(BALANCE_MIN, (mean / n) ** 0.5)) for g, n in per_group.items()}
+    # Bài không gắn công ty (_none) không tham gia cân bằng và giữ hệ số 1 — không khuếch đại tin ngoài lề
+    companies = {g: n for g, n in per_group.items() if g != "_none"}
+    mean = sum(companies.values()) / max(len(companies), 1)
+    factor = {g: min(BALANCE_MAX, max(BALANCE_MIN, (mean / n) ** 0.5)) for g, n in companies.items()}
+    factor["_none"] = 1.0
     for m in merged:
         m.weight = round(m.weight * factor[m.group or "_none"], 4)
 
