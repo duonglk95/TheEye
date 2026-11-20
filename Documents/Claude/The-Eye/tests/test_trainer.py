@@ -108,3 +108,10 @@ def test_admin_detection(monkeypatch):
     monkeypatch.setenv("ADMIN_USER_IDS", "7, 8")
     assert admin.is_admin(8) and not admin.is_admin(42)
     assert not admin.is_admin_private_chat(-1007)
+
+
+def test_unlinked_articles_not_amplified():
+    from app.learning.trainer import dedupe_and_balance
+    samples = [_s(i, "NEU", "llm", f"nvl {i}", "NVL") for i in range(50)] + [_s(900, "NEU", "llm", "lê đức giang", "_none")]
+    merged, stats = dedupe_and_balance(samples)
+    assert stats["company_weight"]["_none"] == 1.0
