@@ -1,5 +1,5 @@
 """
-Vòng tự học — chạy mỗi đêm (02:30) hoặc qua POST /api/admin/train (admin).
+Vòng tự học — chạy ngay sau khi có nhãn mới (app/learning/train_trigger.py) hoặc qua POST /api/admin/train.
 
   1. GOM DỮ LIỆU
      gold   : nhãn người dùng xác nhận qua Telegram            trọng số 3.0

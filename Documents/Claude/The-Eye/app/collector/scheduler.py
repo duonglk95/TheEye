@@ -3,7 +3,7 @@ Scheduler — gắn kết tất cả jobs:
   - Poll RSS mỗi 5 phút → classify → gửi ngay nếu NEG
   - Retry unnotified NEG mỗi 15 phút (phục hồi sau Telegram outage)
   - Scrape full content mỗi 10 phút → ĐỌC LẠI TOÀN BÀI → báo ngay nếu thành NEG
-  - Tự học mỗi đêm 02:30 (train mô hình ML từ phản hồi người dùng + luật)
+  - Tự học ngay sau khi có nhãn mới (debounce — xem app/learning/train_trigger.py)
   - Gửi digest POS mỗi 2 tiếng (8h–22h)
   - Telegram Bot polling (chạy song song)
 """
@@ -82,24 +82,6 @@ async def job_scrape_and_deep_read():
             log.info(f"Deep read: #{c.article_id} {c.old}→NEG, alert sent")
 
 
-async def job_self_learning():
-    """Vòng tự học hằng đêm — chạy ngầm, chỉ ghi log (không gửi vào group)."""
-    from app.learning.trainer import run_learning
-
-    try:
-        report = await run_learning()
-        log.info(f"[learn] v{report.get('version')} {report.get('decision')}: "
-                 f"{report.get('note') or report.get('reason', '')}")
-    except Exception as e:
-        log.exception(f"[learn] failed: {e}")
-
-
-async def job_send_digest():
-    """Gửi digest POS tổng hợp 2 tiếng/lần."""
-    from app.notifier.telegram import send_digest
-    await send_digest()
-
-
 async def start_scheduler():
     from app.notifier.bot_handler import build_application, start_polling, stop_polling
 
@@ -139,15 +121,23 @@ async def start_scheduler():
         misfire_grace_time=120,
     )
 
-    # Tự học: 02:30 mỗi đêm (ít tin, CPU rảnh)
-    scheduler.add_job(
-        job_self_learning,
-        trigger=CronTrigger(hour=2, minute=30),
-        id="self_learning",
-        name="Self-learning (train ML model)",
-        max_instances=1,
-        misfire_grace_time=3600,
+    # Tự học: chấm xong thì học luôn — kiểm tra mỗi phút xem có lượt train đã hẹn chưa
+    from app.learning.train_trigger import (
+        AFTER_LLM_LABELS_SEC, job_train_if_due, labels_newer_than_model, request_training,
     )
+    scheduler.add_job(
+        job_train_if_due,
+        trigger=IntervalTrigger(minutes=1),
+        id="train_if_due",
+        name="Self-learning (sau khi có nhãn mới)",
+        max_instances=1,
+        misfire_grace_time=60,
+    )
+    try:
+        if await labels_newer_than_model():      # có nhãn chưa được học (VD bot vừa khởi động lại)
+            request_training(AFTER_LLM_LABELS_SEC)
+    except Exception as e:
+        log.error(f"[train] không kiểm tra được nhãn mới: {e}")
 
     # Digest POS: mỗi 2 tiếng, vào đầu giờ chẵn (8h–22h)
     scheduler.add_job(
@@ -164,7 +154,7 @@ async def start_scheduler():
     log.info("  - Poll RSS & classify:  every 5 min  → NEG immediate")
     log.info("  - Retry NEG alerts:     every 15 min → outage recovery")
     log.info("  - Scrape + deep read:   every 10 min → re-label from full article")
-    log.info("  - Self-learning:        daily 02:30 ICT")
+    log.info("  - Self-learning:        ngay sau khi có nhãn mới (2 phút với Claude, 10 phút với admin)")
     log.info("  - POS digest:           every 2h (08:00–22:00 ICT)")
 
     await start_polling(bot_app)

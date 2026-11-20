@@ -114,7 +114,7 @@ async def cmd_fix(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
         return
     await update.message.reply_text(
         f"📝 Đã ghi nhận bài #{art.id} là {ICON[label]} <b>{NAME[label]}</b>.\n"
-        f"Bot sẽ học từ nhãn này ở lần tự học tiếp theo (02:30 hằng đêm).",
+        f"Bot sẽ học từ nhãn này ở lần tự học tiếp theo (khoảng 10 phút sau lượt chấm cuối).",
         parse_mode=ParseMode.HTML)
 
 

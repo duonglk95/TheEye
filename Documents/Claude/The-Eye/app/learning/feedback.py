@@ -63,4 +63,6 @@ async def record_feedback(
         await session.commit()
 
     log.info(f"[feedback] #{article_id}: {previous} → {label} by {username or user_id}")
+    from app.learning.train_trigger import AFTER_ADMIN_LABELS_SEC, request_training
+    request_training(AFTER_ADMIN_LABELS_SEC)
     return article
