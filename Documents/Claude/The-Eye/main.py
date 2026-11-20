@@ -20,6 +20,10 @@ logging.basicConfig(
 )
 log = logging.getLogger("the-eye")
 
+# Không để token bot / mật khẩu DB lọt vào log (httpx log cả URL chứa token)
+from app.log_redact import install_redaction  # noqa: E402
+install_redaction()
+
 
 async def run_service():
     """Chế độ background service — dùng trên Railway."""
