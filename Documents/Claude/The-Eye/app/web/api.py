@@ -72,8 +72,24 @@ def build_app(token: str | None) -> web.Application:
         log.info(f"[labeling-api] {labeler}: saved {result['saved']} {result['by_label']}, errors {len(errors)}")
         return web.json_response({**result, "errors": errors[:50]})
 
+    async def unlinked(request):
+        """Bài không gắn công ty nào (VD bị gỡ sau khi sửa từ khoá) — chỉ đọc, để kiểm tra."""
+        from sqlalchemy import select
+        from app.db import AsyncSessionLocal
+        from app.db.models import ArticleMeta
+        limit = _int(request.query.get("limit"), 300, 1, 1000)
+        async with AsyncSessionLocal() as session:
+            rows = await session.execute(
+                select(ArticleMeta.id, ArticleMeta.title, ArticleMeta.published_at)
+                .where(ArticleMeta.company_id == None)  # noqa: E711
+                .order_by(ArticleMeta.published_at.desc()).limit(limit)
+            )
+            items = [{"id": i, "title": t, "published": p.isoformat()} for i, t, p in rows.all()]
+        return web.json_response({"count": len(items), "articles": items})
+
     app.router.add_get("/healthz", healthz)
     if token:
+        app.router.add_get("/api/admin/unlinked", unlinked)
         app.middlewares.append(auth)
         app.router.add_get("/api/labeling/pending", pending)
         app.router.add_post("/api/labeling/labels", labels)
