@@ -40,7 +40,7 @@ async def get_all_companies() -> list[Company]:
         return list(result.scalars().all())
 
 
-async def build_company_report(ticker: str, hours: int = 24) -> str:
+async def build_company_report(ticker: str, hours: int = 24, numbered: bool = False) -> str:
     """
     Báo cáo đầy đủ cho 1 công ty.
     Trả về chuỗi đã format HTML cho Telegram.
@@ -133,7 +133,7 @@ async def build_company_report(ticker: str, hours: int = 24) -> str:
             if i:
                 lines.append("")
             ids.append(art.id)
-            lines.append(article_item(art, src, index=len(ids)))
+            lines.append(article_item(art, src, index=len(ids) if numbered else None))
         if total_in_group > len(rows):
             lines.append(f"<i>+ {total_in_group - len(rows)} tin khác</i>")
 
@@ -184,7 +184,7 @@ async def build_overview_report(hours: int = 24) -> str:
     return "\n".join(lines)
 
 
-async def search_articles(keyword: str, hours: int = 48, limit: int = 8) -> str:
+async def search_articles(keyword: str, hours: int = 48, limit: int = 8, numbered: bool = False) -> str:
     """Tìm kiếm bài báo theo từ khóa trong title hoặc summary."""
     since = datetime.now(timezone.utc) - timedelta(hours=hours)
     label_range = f"{hours}h" if hours < 48 else f"{hours // 24} ngày"
@@ -217,12 +217,12 @@ async def search_articles(keyword: str, hours: int = 48, limit: int = 8) -> str:
     for i, (art, company) in enumerate(rows):
         if i:
             lines.append("")
-        lines.append(article_item(art, None, index=i + 1 if i < MAX_ROWS else None, ticker=company.ticker))
+        lines.append(article_item(art, None, index=i + 1 if numbered and i < MAX_ROWS else None, ticker=company.ticker))
     lines.append(footer())
     return Report("\n".join(lines), [art.id for art, _ in rows])
 
 
-async def build_top_report(sentiment: str, hours: int = 24, limit: int = 5) -> str:
+async def build_top_report(sentiment: str, hours: int = 24, limit: int = 5, numbered: bool = False) -> str:
     """Top POS hoặc NEG across tất cả công ty."""
     since = datetime.now(timezone.utc) - timedelta(hours=hours)
     now_str = datetime.now(VN_TZ).strftime("%H:%M %d/%m/%Y")
@@ -250,7 +250,7 @@ async def build_top_report(sentiment: str, hours: int = 24, limit: int = 5) -> s
         f"<i>cập nhật {now_str}</i>",
     ]
     for i, (art, company, src) in enumerate(rows, 1):
-        lines += ["", article_item(art, src, index=i, ticker=company.ticker)]
+        lines += ["", article_item(art, src, index=i if numbered else None, ticker=company.ticker)]
 
     lines.append(footer())
     return Report("\n".join(lines), [art.id for art, _, _ in rows])

@@ -10,8 +10,8 @@ Sau /start (hoặc /menu), bàn phím gõ chữ được thay bằng các nút l
   │ 🔔 Bật thông báo (chat riêng)  │
   └────────────────────────────────┘
 
-Chạm nút = Telegram gửi đúng chữ trên nút → bot nhận diện và trả báo cáo
-(kèm hàng 🔴 Xấu / ⚪ Thường / 🟢 Tốt để chấm tin).
+Chạm nút = Telegram gửi đúng chữ trên nút → bot nhận diện và trả báo cáo.
+(Admin, trong chat riêng, có thêm hàng nút 🔴/⚪/🟢 để chấm nhãn.)
 Trong group cần tắt Privacy Mode của bot (BotFather → /setprivacy → Disable) để bot thấy nút được chạm.
 """
 import logging
@@ -21,6 +21,7 @@ from telegram import KeyboardButton, ReplyKeyboardMarkup, Update
 from telegram.constants import ChatType, ParseMode
 from telegram.ext import ContextTypes
 
+from app.notifier.admin import is_admin_private_chat
 from app.notifier.rating import keyboard as rating_keyboard
 from app.notifier.rating import to_telegram_markup
 
@@ -40,8 +41,7 @@ BUTTON_PATTERN = re.compile(
 
 MENU_TEXT = (
     "👋 <b>Chào bạn, mình là Bao</b>\n"
-    "Chạm nút bên dưới để xem tin.\n"
-    "<i>Dưới mỗi tin có 🔴 Xấu / ⚪ Thường / 🟢 Tốt: Hãy giúp Bao sẽ giỏi hơn bằng cách đánh giá tin nhé</i>"
+    "Chạm nút bên dưới để xem tin."
 )
 
 
@@ -100,18 +100,19 @@ async def on_button(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
         await update.message.reply_text(msg, reply_markup=await reply_keyboard(chat))
         return
 
+    admin = is_admin_private_chat(chat.id)      # chỉ admin (chat riêng) thấy nút chấm nhãn
     if text.startswith(TICKER_PREFIX):
-        report = await build_company_report(text[len(TICKER_PREFIX):], 24)
+        report = await build_company_report(text[len(TICKER_PREFIX):], 24, numbered=admin)
     elif text == BTN_ALL:
         report = await build_overview_report(24)
     elif text == BTN_POS:
-        report = await build_top_report("POS", 24)
+        report = await build_top_report("POS", 24, numbered=admin)
     elif text == BTN_NEG:
-        report = await build_top_report("NEG", 24)
+        report = await build_top_report("NEG", 24, numbered=admin)
     else:
         return
 
+    markup = to_telegram_markup(rating_keyboard(getattr(report, "article_ids", []))) if admin else None
     await update.message.reply_text(
-        report, parse_mode=ParseMode.HTML, disable_web_page_preview=True,
-        reply_markup=to_telegram_markup(rating_keyboard(getattr(report, "article_ids", []))),
+        report, parse_mode=ParseMode.HTML, disable_web_page_preview=True, reply_markup=markup,
     )

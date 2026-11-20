@@ -57,3 +57,54 @@ def test_menu_button_pattern():
         assert BUTTON_PATTERN.match(ok), ok
     for bad in ("📊 NAF hôm nay thế nào", "NAF", "tin tốt"):
         assert not BUTTON_PATTERN.match(bad), bad
+
+
+def _s(aid, label, source, key, group, text="x", weight=1.0):
+    from app.classifier.ml_model import Sample
+    return Sample(aid, text, label, weight, source, key, group)
+
+
+def test_dedupe_merges_same_title_and_prefers_trusted_source():
+    from app.learning.trainer import dedupe_and_balance
+    samples = [
+        _s(10, "POS", "silver", "nvl lùi hạn chào bán", "NVL", text="ngắn"),
+        _s(11, "NEG", "llm", "nvl lùi hạn chào bán", "NVL", text="nội dung dài hơn nhiều"),
+        _s(12, "NEG", "llm", "nvl lùi hạn chào bán", "NVL"),
+        _s(20, "POS", "gold", "sbt nhận huân chương", "SBT"),
+    ]
+    merged, stats = dedupe_and_balance(samples)
+    by_key = {m.key: m for m in merged}
+    nvl = by_key["nvl lùi hạn chào bán"]
+    assert len(merged) == 2 and stats["before_dedup"] == 4
+    assert nvl.label == "NEG" and nvl.source == "llm"          # Claude thắng luật
+    assert nvl.article_id == 10 and nvl.dup_count == 3          # id nhỏ nhất → cả nhóm cùng phía train/val
+    assert nvl.text == "nội dung dài hơn nhiều"
+
+
+def test_balance_downweights_dominant_company():
+    from app.learning.trainer import dedupe_and_balance
+    samples = [_s(i, "NEU", "llm", f"nvl {i}", "NVL") for i in range(90)] + \
+              [_s(100 + i, "NEU", "llm", f"sbt {i}", "SBT") for i in range(10)]
+    merged, stats = dedupe_and_balance(samples)
+    w = {m.group: m.weight for m in merged}
+    assert w["NVL"] < 1.0 < w["SBT"]
+    total = {g: sum(m.weight for m in merged if m.group == g) for g in ("NVL", "SBT")}
+    assert total["NVL"] / total["SBT"] < 9      # trước cân bằng: 90/10 = 9 lần
+    assert stats["per_company"] == {"NVL": 90, "SBT": 10}
+
+
+def test_title_key_ignores_source_suffix_and_punctuation():
+    from app.learning.trainer import title_key
+    assert title_key("Novaland lùi hạn chào bán cổ phiếu - CafeF") == title_key("Novaland lùi hạn chào bán cổ phiếu!")
+
+
+def test_admin_detection(monkeypatch):
+    from app.notifier import admin
+    monkeypatch.setenv("ADMIN_USER_IDS", "")
+    monkeypatch.setenv("TELEGRAM_CHAT_ID", "-100123")         # group → không suy ra admin
+    assert not admin.is_admin(42)
+    monkeypatch.setenv("TELEGRAM_CHAT_ID", "42")              # chat riêng của chủ bot
+    assert admin.is_admin(42) and admin.is_admin_private_chat(42) and not admin.is_admin(7)
+    monkeypatch.setenv("ADMIN_USER_IDS", "7, 8")
+    assert admin.is_admin(8) and not admin.is_admin(42)
+    assert not admin.is_admin_private_chat(-1007)

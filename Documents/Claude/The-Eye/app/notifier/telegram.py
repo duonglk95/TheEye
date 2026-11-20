@@ -20,6 +20,7 @@ from app.notifier.alert_config import is_ticker_watched
 from app.notifier.formatting import (
     ICON, NAME, confidence_text, esc, short_title, source_name, when,
 )
+from app.notifier.admin import is_admin_private_chat
 from app.notifier.rating import MAX_ROWS as RATING_MAX_ROWS
 from app.notifier.rating import keyboard as rating_keyboard
 
@@ -164,7 +165,9 @@ async def _broadcast(
 
     ok_count = 0
     for chat_id in targets:
-        if await _send_to_chat(chat_id, text, reply_markup):
+        # Nút chấm nhãn chỉ gửi cho admin (chat riêng) — người dùng thường chỉ nhận tin
+        markup = reply_markup if is_admin_private_chat(chat_id) else None
+        if await _send_to_chat(chat_id, text, markup):
             ok_count += 1
         await asyncio.sleep(0.05)  # Tránh Telegram rate limit
 
@@ -291,7 +294,8 @@ async def send_digest() -> bool:
     lines = [f"📈 <b>Tin tích cực</b> · <i>{now_vn}</i>"]
 
     article_ids_to_mark = []
-    rated_ids: list[int] = []      # bài được đánh số & có hàng mặt cười
+    rated_ids: list[int] = []      # bài được đánh số & có hàng nút chấm (chỉ khi chat chính là admin)
+    for_admin = is_admin_private_chat(CHAT_ID)
 
     for ticker, data in by_company.items():
         company = data["company"]
@@ -303,7 +307,7 @@ async def send_digest() -> bool:
             if i:
                 lines.append("")
             num = ""
-            if len(rated_ids) < RATING_MAX_ROWS:
+            if for_admin and len(rated_ids) < RATING_MAX_ROWS:
                 rated_ids.append(art.id)
                 num = f"<b>{len(rated_ids)}.</b> "
             title = esc(short_title(art.title, strip_source="news.google.com" in (art.url or "")))
@@ -317,7 +321,7 @@ async def send_digest() -> bool:
         article_ids_to_mark.extend(a.id for a in articles)
 
     full_text = "\n".join(lines)
-    ok = await _send_chunked(full_text, reply_markup=rating_keyboard(rated_ids))
+    ok = await _send_chunked(full_text, reply_markup=rating_keyboard(rated_ids) if for_admin else None)
 
     if ok and article_ids_to_mark:
         async with AsyncSessionLocal() as session:

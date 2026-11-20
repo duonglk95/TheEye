@@ -12,7 +12,7 @@ Vì sao chọn mô hình này (thay vì deep learning / LLM):
   Ta hiệu chỉnh (calibrate) bằng Temperature Scaling: tìm 1 hệ số T trên tập kiểm định
   (bài mô hình chưa từng thấy khi train) sao cho xác suất khớp tần suất đúng thực tế.
   Sau hiệu chỉnh:  "bot nói 80%"  ≈  "trong 100 bài bot nói 80%, khoảng 80 bài đúng nhãn".
-  Mức độ khớp được đo bằng ECE (Expected Calibration Error) và bảng reliability, xem /learn.
+  Mức độ khớp được đo bằng ECE (Expected Calibration Error) và bảng reliability (POST /api/admin/train).
 
 Module này thuần tính toán (không đụng DB) để dễ test.
 """
@@ -63,6 +63,9 @@ class Sample:
     label: str
     weight: float = 1.0
     source: str = "silver"      # gold (người chấm) | llm (Claude chấm hộ) | silver (luật đọc toàn bài) | pseudo
+    key: str = ""               # tiêu đề chuẩn hoá — gộp bài trùng (cùng tin đăng lại nhiều báo)
+    group: str = ""             # ticker — cân bằng trọng số giữa các công ty
+    dup_count: int = 1          # số bài trùng đã gộp vào mẫu này
 
 
 def is_validation(article_id: int, ratio: int = 5) -> bool:
