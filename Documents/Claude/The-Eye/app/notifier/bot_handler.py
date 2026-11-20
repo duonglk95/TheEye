@@ -56,12 +56,13 @@ def _is_admin_chat(update) -> bool:
     return is_admin_private_chat(update.effective_chat.id)
 
 
-def _rating_markup(report, update):
-    """Hàng nút 🔴 Xấu / ⚪ Thường / 🟢 Tốt — CHỈ cho admin trong chat riêng."""
-    if not _is_admin_chat(update):
-        return None
-    from app.notifier.rating import keyboard, to_telegram_markup
-    return to_telegram_markup(keyboard(getattr(report, "article_ids", [])))
+def _rating_markup(report, update, kind: str | None = None, hours: int = 168):
+    """
+    Hàng chọn thời gian (24 giờ · 7 ngày · 30 ngày) nếu biết loại báo cáo,
+    + hàng nút 🔴 Xấu / ⚪ Thường / 🟢 Tốt — CHỈ cho admin trong chat riêng.
+    """
+    from app.notifier.menu import report_markup
+    return report_markup(kind, hours, report, _is_admin_chat(update))
 
 BOT_TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
 
@@ -76,9 +77,9 @@ TICKER_ALIASES = {
 
 
 def _parse_hours(arg: str | None) -> int:
-    """Parse '24h', '48h', '7d' → số giờ."""
+    """Parse '24h', '48h', '7d' → số giờ. Mặc định 7 ngày."""
     if not arg:
-        return 24
+        return 168
     arg = arg.lower().strip()
     if arg.endswith("d"):
         return int(arg[:-1]) * 24
@@ -87,7 +88,7 @@ def _parse_hours(arg: str | None) -> int:
     try:
         return int(arg)
     except ValueError:
-        return 24
+        return 168
 
 
 def _normalize_ticker(raw: str) -> str:
@@ -159,7 +160,7 @@ async def cmd_report(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
         report,
         parse_mode=ParseMode.HTML,
         disable_web_page_preview=True,
-        reply_markup=_rating_markup(report, update),
+        reply_markup=_rating_markup(report, update, f"rep|{ticker}", hours),
     )
     log.info(f"[bot] /report {ticker} {hours}h → sent to chat {update.effective_chat.id}")
 
@@ -177,7 +178,7 @@ async def cmd_all(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
         report,
         parse_mode=ParseMode.HTML,
         disable_web_page_preview=True,
-        reply_markup=_rating_markup(report, update),
+        reply_markup=_rating_markup(report, update, "all", hours),
     )
 
 
@@ -207,7 +208,7 @@ async def cmd_top(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
         report,
         parse_mode=ParseMode.HTML,
         disable_web_page_preview=True,
-        reply_markup=_rating_markup(report, update),
+        reply_markup=_rating_markup(report, update, f"top|{sentiment_raw}", hours),
     )
 
 
@@ -727,12 +728,13 @@ def build_application() -> Application:
 
     # Tra cứu
     # Menu nút bấm — điểm vào chính cho người dùng
-    from app.notifier.menu import BUTTON_PATTERN, cmd_menu, on_button
+    from app.notifier.menu import BUTTON_PATTERN, cb_range, cmd_menu, on_button
     app.add_handler(CommandHandler("start",       cmd_menu))
     app.add_handler(CommandHandler("menu",        cmd_menu))
     app.add_handler(CommandHandler("help",        cmd_menu))
     app.add_handler(CommandHandler("commands",    cmd_help))     # danh sách lệnh đầy đủ (ẩn)
     app.add_handler(MessageHandler(filters.Regex(BUTTON_PATTERN), on_button))  # bàn phím nút cố định
+    app.add_handler(CallbackQueryHandler(cb_range, pattern=r"^rg\|"))         # đổi khoảng thời gian
     app.add_handler(CommandHandler("report",      cmd_report))
     app.add_handler(CommandHandler("all",         cmd_all))
     app.add_handler(CommandHandler("status",      cmd_status))
@@ -782,8 +784,8 @@ async def set_bot_commands(application: Application) -> None:
     /fix, /why và nút chấm nhãn chỉ dành cho admin (xem app/notifier/admin.py).
     """
     commands = [
-        BotCommand("menu",   "Hiện bàn phím nút: xem tin từng công ty"),
-        BotCommand("report", "Tin 1 công ty: /report NAF (thêm 7d để xem 7 ngày)"),
+        BotCommand("menu",   "Mở bảng chọn công ty"),
+        BotCommand("report", "Xem tin một công ty, ví dụ: /report NAF"),
     ]
     await application.bot.set_my_commands(commands)
     log.info("[bot] Commands registered on Telegram")

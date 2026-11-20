@@ -59,7 +59,7 @@ Mỗi 10 phút:
 T2–T6, 04:55:  Claude Haiku (Scheduled Task, dùng gói Claude) chấm nhãn các tin mới qua API của bot
 Ngay sau đó:   Bao tự học từ các nhãn mới → chỉ dùng mô hình mới nếu tốt hơn bản cũ
 
-Người dùng chạm nút 📊 VIC ─► Báo cáo tin VIC 24h
+Người dùng chạm nút VIC ─► Báo cáo tin VIC 7 ngày (đổi 24 giờ / 30 ngày bằng nút)
 ```
 
 ---
@@ -314,13 +314,12 @@ Khi chạy `python main.py --demo` hoặc `--tui`, bạn thấy màn hình như 
 gõ chữ được thay bằng các nút luôn hiện sẵn:
 
 ```
-📊 SBT   📊 DGC   📊 NAF
-📊 VIC   📊 CTD   📊 NVL
-📋 Tổng quan  🟢 Tin tốt  🔴 Tin xấu
-🔔 Bật thông báo        (chỉ trong chat riêng)
+CTD  DGC  NAF  NVL  SBT  VIC
+📋 Tất cả   🟢 Tin tốt   🔴 Tin xấu
+🔔 Nhận thông báo      (chỉ trong chat riêng)
 ```
 
-Chạm 1 nút là ra báo cáo 24h. Menu lệnh của Telegram chỉ còn `/menu` và `/report`; các lệnh dưới đây vẫn dùng được
+Chạm 1 nút là ra báo cáo **7 ngày**. Dưới báo cáo có hàng `24 giờ · ✓ 7 ngày · 30 ngày` — chạm để đổi ngay tại chỗ. Menu lệnh của Telegram chỉ còn `/menu` và `/report`; các lệnh dưới đây vẫn dùng được
 nhưng ẩn (gõ `/commands` để xem đủ):
 
 ---
@@ -350,9 +349,9 @@ nhưng ẩn (gõ `/commands` để xem đủ):
 ```
 
 **Khoảng thời gian hỗ trợ:**
-- `24h` — 24 giờ qua *(mặc định nếu không ghi)*
+- `24h` — 24 giờ qua
 - `48h` — 2 ngày qua
-- `7d` — 7 ngày qua
+- `7d` — 7 ngày qua *(mặc định nếu không ghi)*
 
 ---
 
@@ -714,7 +713,7 @@ CronTrigger(hour="8,10,12,14,16,18,20,22", minute=0)
 
 → 🔴 tiêu cực: gửi ngay (`job_poll_and_classify` và `job_scrape_and_deep_read` trong `app/collector/scheduler.py`).
 → 🟢 tích cực: gom vào bản tin 2 tiếng/lần (`send_digest` trong `app/notifier/telegram.py`).
-→ ⚪ trung lập: không gửi, chỉ xem qua nút 📊 / báo cáo.
+→ ⚪ trung lập: không gửi, chỉ xem qua nút công ty / báo cáo.
 
 ---
 

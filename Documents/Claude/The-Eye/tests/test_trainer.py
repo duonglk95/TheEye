@@ -53,10 +53,23 @@ def test_rating_keyboard_single_and_multi():
 
 def test_menu_button_pattern():
     from app.notifier.menu import BUTTON_PATTERN
-    for ok in ("📊 NAF", "📋 Tổng quan", "🟢 Tin tốt", "🔴 Tin xấu", "🔔 Bật thông báo", "🔕 Tắt thông báo"):
+    for ok in ("NAF", "NVL", "📋 Tất cả", "🟢 Tin tốt", "🔴 Tin xấu", "🔔 Nhận thông báo", "🔕 Tắt thông báo"):
         assert BUTTON_PATTERN.match(ok), ok
-    for bad in ("📊 NAF hôm nay thế nào", "NAF", "tin tốt"):
+    for bad in ("NAF hôm nay thế nào", "naf", "tin tốt", "📊 NAF"):
         assert not BUTTON_PATTERN.match(bad), bad
+
+
+def test_range_row_and_report_markup():
+    from app.notifier.formatting import Report
+    from app.notifier.menu import range_row, report_markup
+    row = range_row("rep|SBT", 168)
+    assert [b["text"] for b in row] == ["24 giờ", "✓ 7 ngày", "30 ngày"]
+    assert row[2]["callback_data"] == "rg|rep|SBT|720"
+    rep = Report("x", [5, 6])
+    user = report_markup("rep|SBT", 168, rep, admin=False).inline_keyboard
+    assert len(user) == 1                                   # người dùng: chỉ hàng thời gian
+    admin = report_markup("rep|SBT", 168, rep, admin=True).inline_keyboard
+    assert len(admin) == 3 and admin[1][1].callback_data == "r:5:1"   # admin: + 2 hàng chấm
 
 
 def _s(aid, label, source, key, group, text="x", weight=1.0):
