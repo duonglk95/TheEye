@@ -19,6 +19,7 @@
 10. [Deploy lên Railway (chạy 24/7)](#10-deploy-lên-railway-chạy-247)
 11. [Thêm / bớt công ty theo dõi](#11-thêm--bớt-công-ty-theo-dõi)
 12. [Chỉnh sửa từ khóa tích cực / tiêu cực](#12-chỉnh-sửa-từ-khóa-tích-cực--tiêu-cực)
+12b. [Bao tự học — đọc toàn bài & ý nghĩa con số %](#12b-bao-tự-học--đọc-toàn-bài--ý-nghĩa-con-số-)
 13. [Câu hỏi thường gặp](#13-câu-hỏi-thường-gặp)
 
 ---
@@ -565,6 +566,49 @@ negative:
 
 ---
 
+## 12b. Bao tự học — đọc toàn bài & ý nghĩa con số %
+
+### Bao đọc tin thế nào?
+
+1. **Đọc nhanh** (ngay khi lấy RSS): chỉ tiêu đề + sapo.
+2. **Đọc toàn bài** (10 phút sau, khi đã tải được nội dung): chấm từng câu trong thân bài.
+   Tin kiểu *"AgriS nhận Huân chương Lao động"* — tiêu đề không có chữ "tăng/lãi", nhưng thân bài toàn câu tích cực — sẽ được chuyển ⚪ → 🟢.
+   Nếu đọc toàn bài thấy 🔴, bot gửi cảnh báo ngay.
+   *(Bài từ Google News không tải được nội dung vì link là trang chuyển hướng — chỉ đọc tiêu đề.)*
+
+### Bao tự học thế nào? (không dùng LLM)
+
+- Dưới mỗi cảnh báo có nút **✅ Đúng / 🟢 / 🔴 / ⚪**. Mỗi lần bấm là dạy bot 1 bài. Hoặc gõ `/fix 1234 pos`.
+- **02:30 mỗi đêm**, bot train mô hình **TF-IDF + Logistic Regression** (scikit-learn, chạy CPU, ~100MB RAM) từ:
+  - 👤 nhãn người dùng (quan trọng nhất),
+  - 📏 các bài mà luật từ khoá đọc toàn bài thấy rõ ràng,
+  - 🔁 các bài chính mô hình rất chắc chắn (chỉ bật khi mô hình đã được kiểm chứng tốt).
+- Mô hình mới **chỉ được dùng nếu kiểm tra trên bài chưa từng học cho kết quả ≥ mô hình cũ**; nếu kém hơn thì giữ mô hình cũ.
+- Mô hình học được cả những cụm từ luật không có (VD "huân chương", "ghi nhận đóng góp").
+
+### Con số % nghĩa là gì?
+
+| Hiển thị | Ý nghĩa |
+|---|---|
+| `82%` | Mô hình tự học, **đã hiệu chỉnh**: trong 100 bài bot chấm ~82%, khoảng 82 bài đúng nhãn. Được kiểm chứng trên bài bot chưa từng học. |
+| `~50%` | Chưa có mô hình — **ước lượng theo từ khoá, chưa kiểm chứng**: 1 từ khoá ≈ 50%, nhiều bằng chứng cùng chiều thì cao hơn. |
+| `✔ đã xác nhận` | Người dùng đã xác nhận nhãn. |
+
+Bot không bao giờ hiện 100%.
+
+### Lệnh liên quan
+
+| Lệnh | Tác dụng |
+|---|---|
+| `/why 1234` (hoặc bấm `/why_1234` dưới tin) | Vì sao bot chấm bài này, căn cứ là cụm từ nào, % kiểm chứng ra sao |
+| `/fix 1234 pos\|neg\|neu` | Sửa nhãn để dạy bot |
+| `/learn` | Độ chính xác hiện tại, bảng "bot nói X% → thực tế đúng Y%" |
+| `/learn now` | Tự học ngay (chỉ chat chính) |
+
+> Cần ít nhất ~40 bài có nhãn rõ để train lần đầu. Trước đó bot dùng từ khoá (hiện `~%`).
+
+---
+
 ## 13. Câu hỏi thường gặp
 
 ---
@@ -645,4 +689,4 @@ Nếu gặp vấn đề không giải quyết được, cung cấp:
 ---
 
 *👁 The-Eye — News Intelligence Monitor*
-*Phiên bản hiện tại: Phase 1 (RSS + Rule-based classifier + Telegram Bot)*
+*Phiên bản hiện tại: Phase 2 (RSS + đọc toàn bài + ML tự học có hiệu chỉnh + Telegram Bot)*

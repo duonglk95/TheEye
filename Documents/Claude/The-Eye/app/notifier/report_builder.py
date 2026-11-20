@@ -6,15 +6,14 @@ import html as html_lib
 from datetime import datetime, timedelta, timezone
 from sqlalchemy import select, func
 from app.db import AsyncSessionLocal
+from app.notifier.formatting import (
+    article_item, confidence_text, counts_line, esc, footer, mood_line,
+)
 from app.db.models import ArticleMeta, Company, FeedSource
 
 VN_TZ = timezone(timedelta(hours=7))
 SENTIMENT_ICON  = {"POS": "🟢", "NEG": "🔴", "NEU": "⚪"}
 SENTIMENT_LABEL = {"POS": "TÍCH CỰC", "NEG": "TIÊU CỰC", "NEU": "TRUNG LẬP"}
-
-
-def _pct(score) -> str:
-    return f"{int((score or 0) * 100)}%"
 
 
 def _pub(published_at) -> str:
@@ -104,78 +103,38 @@ async def build_company_report(ticker: str, hours: int = 24) -> str:
             .where(ArticleMeta.published_at >= since)
             .where(ArticleMeta.sentiment == "NEU")
             .order_by(ArticleMeta.published_at.desc())
-            .limit(2)
+            .limit(3)
         )
         neu_rows = neu_articles.fetchall()
 
     # ── Format báo cáo ──
-    now_str = datetime.now(VN_TZ).strftime("%H:%M %d/%m/%Y")
+    now_str = datetime.now(VN_TZ).strftime("%H:%M %d/%m")
     label_range = f"{hours}h" if hours < 48 else f"{hours // 24} ngày"
+    pos_c, neg_c, neu_c = counts.get("POS", 0), counts.get("NEG", 0), counts.get("NEU", 0)
 
     lines = [
-        f"📊 <b>BÁO CÁO: [{company.ticker}] {company.name}</b>",
-        f"<i>⏱ {label_range} qua  •  Cập nhật lúc {now_str}</i>",
-        "─────────────────────────",
+        f"📊 <b>{esc(company.ticker)} · {esc(company.name)}</b>",
+        f"<i>{label_range} qua · cập nhật {now_str}</i>",
+        "",
+        counts_line(pos_c, neg_c, neu_c),
+        mood_line(pos_c, neg_c),
     ]
 
-    # Summary bar
-    pos_c = counts.get("POS", 0)
-    neg_c = counts.get("NEG", 0)
-    neu_c = counts.get("NEU", 0)
-    lines.append(
-        f"📰 Tổng: <b>{total}</b> bài  │  "
-        f"🟢 <b>{pos_c}</b>  🔴 <b>{neg_c}</b>  ⚪ {neu_c}"
-    )
+    sections = [("📈 <b>Tích cực</b>", pos_rows, pos_c, True),
+                ("📉 <b>Tiêu cực</b>", neg_rows, neg_c, True),
+                ("📋 <b>Trung lập</b>", neu_rows, neu_c, False)]
+    for heading, rows, total_in_group, show_conf in sections:
+        if not rows:
+            continue
+        lines += ["", heading]
+        for i, (art, src) in enumerate(rows):
+            if i:
+                lines.append("")
+            lines.append(article_item(art, src, show_conf=show_conf))
+        if total_in_group > len(rows):
+            lines.append(f"<i>+ {total_in_group - len(rows)} tin khác</i>")
 
-    # Mood indicator
-    if pos_c > neg_c * 2:
-        mood = "🟢 <b>Xu hướng TÍCH CỰC</b>"
-    elif neg_c > pos_c * 2:
-        mood = "🔴 <b>Xu hướng TIÊU CỰC</b>"
-    elif neg_c > 0 and pos_c > 0:
-        mood = "🟡 <b>Tín hiệu HỖN HỢP</b>"
-    else:
-        mood = "⚪ <b>Không có tín hiệu rõ</b>"
-    lines.append(mood)
-
-    # Theo dõi id đã hiện để dedup giữa các section
-    shown_ids: set[int] = set()
-
-    def _article_line(art, src, emoji: str, show_score: bool = True) -> str:
-        src_name = html_lib.escape(src.name.split(" - ")[-1] if src else "")
-        raw = art.title[:80] + "…" if len(art.title) > 80 else art.title
-        title = html_lib.escape(raw)
-        score_part = f" [{_pct(art.sentiment_score)}]" if show_score else ""
-        return (
-            f"  {emoji}{score_part} "
-            f"<a href='{html_lib.escape(art.url)}'>{title}</a>\n"
-            f"       <i>{_pub(art.published_at)}  {src_name}</i>"
-        )
-
-    # Top POS
-    if pos_rows:
-        lines.append("\n📈 <b>TIN TÍCH CỰC:</b>")
-        for art, src in pos_rows:
-            shown_ids.add(art.id)
-            lines.append(_article_line(art, src, "🟢"))
-
-    # Top NEG
-    if neg_rows:
-        lines.append("\n📉 <b>TIN TIÊU CỰC:</b>")
-        for art, src in neg_rows:
-            shown_ids.add(art.id)
-            lines.append(_article_line(art, src, "🔴"))
-
-    # NEU — luôn hiện, bỏ qua bài đã có trong POS/NEG (dedup)
-    neu_filtered = [(art, src) for art, src in neu_rows if art.id not in shown_ids]
-    if neu_filtered:
-        lines.append("\n📋 <b>TIN TRUNG LẬP:</b>")
-        for art, src in neu_filtered:
-            lines.append(_article_line(art, src, "⚪", show_score=False))
-
-    lines.append("\n─────────────────────────")
-    lines.append(f"<i>👁 The-Eye by dlk  •  /report {company.ticker} [24h|48h|7d]</i>")
-
+    lines.append(footer(f"/report {company.ticker} 7d"))
     return "\n".join(lines)
 
 
@@ -192,9 +151,9 @@ async def build_overview_report(hours: int = 24) -> str:
         companies = list(companies.all())
 
         lines = [
-            f"📋 <b>TỔNG QUAN — {label_range} QUA</b>",
-            f"<i>⏱ Cập nhật lúc {now_str}</i>",
-            "═════════════════════════",
+            f"📋 <b>Tổng quan · {label_range} qua</b>",
+            f"<i>cập nhật {now_str}</i>",
+            "",
         ]
 
         for company in companies:
@@ -207,34 +166,18 @@ async def build_overview_report(hours: int = 24) -> str:
             )
             counts = {r.sentiment: r.cnt for r in count_result.fetchall()}
             total = sum(counts.values())
-            pos_c = counts.get("POS", 0)
-            neg_c = counts.get("NEG", 0)
-            neu_c = counts.get("NEU", 0)
+            pos_c, neg_c, neu_c = counts.get("POS", 0), counts.get("NEG", 0), counts.get("NEU", 0)
 
             if total == 0:
-                lines.append(f"  [{company.ticker}] {company.name:<16} — Không có tin")
+                lines.append(f"▫️ <b>{esc(company.ticker)}</b> {esc(company.name)}\n<i>không có tin</i>")
                 continue
-
-            # Trend arrow
-            if pos_c > neg_c:
-                trend = "↑"
-            elif neg_c > pos_c:
-                trend = "↓"
-            else:
-                trend = "→"
-
-            bar_parts = []
-            if pos_c: bar_parts.append(f"🟢{pos_c}")
-            if neg_c: bar_parts.append(f"🔴{neg_c}")
-            if neu_c: bar_parts.append(f"⚪{neu_c}")
-
+            trend = "📈" if pos_c > neg_c else "📉" if neg_c > pos_c else "➖"
             lines.append(
-                f"  {trend} <b>[{company.ticker}]</b> {company.name:<14}"
-                f"  {' '.join(bar_parts)}  <i>({total} bài)</i>"
+                f"{trend} <b>{esc(company.ticker)}</b> {esc(company.name)}\n"
+                f"<i>🟢 {pos_c} · 🔴 {neg_c} · ⚪ {neu_c} · {total} bài</i>"
             )
 
-    lines.append("─────────────────────────")
-    lines.append("<i>Dùng /report TICKER để xem chi tiết</i>")
+    lines.append(footer("/report TICKER để xem chi tiết"))
     return "\n".join(lines)
 
 
@@ -265,20 +208,14 @@ async def search_articles(keyword: str, hours: int = 48, limit: int = 8) -> str:
         )
 
     lines = [
-        f"🔍 <b>KẾT QUẢ: «{kw_escaped}»</b>",
-        f"<i>{len(rows)} bài trong {label_range} qua</i>",
-        "─────────────────────────",
+        f"🔍 <b>«{kw_escaped}»</b> · {len(rows)} bài trong {label_range} qua",
+        "",
     ]
-    for art, company in rows:
-        emoji = SENTIMENT_ICON.get(art.sentiment, "⚪")
-        raw = art.title[:80] + "…" if len(art.title) > 80 else art.title
-        title = html_lib.escape(raw)
-        lines.append(
-            f"{emoji} <b>[{company.ticker}]</b> {_pub(art.published_at)}\n"
-            f"  <a href='{html_lib.escape(art.url)}'>{title}</a>"
-        )
-
-    lines.append(f"\n<i>👁 /search {html_lib.escape(keyword)} [24h|48h|7d]</i>")
+    for i, (art, company) in enumerate(rows):
+        if i:
+            lines.append("")
+        lines.append(article_item(art, None, ticker=company.ticker))
+    lines.append(footer(f"/search {keyword} 7d"))
     return "\n".join(lines)
 
 
@@ -306,19 +243,11 @@ async def build_top_report(sentiment: str, hours: int = 24, limit: int = 5) -> s
         return f"{icon} Không có tin <b>{label}</b> nào trong {label_range} qua."
 
     lines = [
-        f"{icon} <b>TOP {limit} TIN {label} — {label_range} QUA</b>",
-        f"<i>⏱ {now_str}</i>",
-        "─────────────────────────",
+        f"{icon} <b>Top {limit} tin {label.lower()} · {label_range} qua</b>",
+        f"<i>cập nhật {now_str}</i>",
     ]
     for i, (art, company, src) in enumerate(rows, 1):
-        src_name = html_lib.escape(src.name.split(" - ")[-1] if src else "")
-        raw = art.title[:80] + "…" if len(art.title) > 80 else art.title
-        title = html_lib.escape(raw)
-        lines.append(
-            f"{i}. <b>[{company.ticker}]</b> {icon} {_pct(art.sentiment_score)}\n"
-            f"   <a href='{html_lib.escape(art.url)}'>{title}</a>\n"
-            f"   <i>{_pub(art.published_at)}  {src_name}</i>"
-        )
+        lines += ["", f"<b>{i}.</b> " + article_item(art, src, ticker=company.ticker)]
 
-    lines.append(f"\n<i>👁 The-Eye by dlk  •  /top pos | /top neg</i>")
+    lines.append(footer("/top pos", "/top neg"))
     return "\n".join(lines)

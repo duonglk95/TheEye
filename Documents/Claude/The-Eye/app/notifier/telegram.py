@@ -8,14 +8,18 @@ import asyncio
 import html as html_lib
 import logging
 import os
+import re
 from datetime import datetime, timedelta, timezone
 
 import httpx
 from sqlalchemy import select, update
 
 from app.db import AsyncSessionLocal
-from app.db.models import ArticleMeta, Company
+from app.db.models import ArticleMeta, Company, FeedSource
 from app.notifier.alert_config import is_ticker_watched
+from app.notifier.formatting import (
+    ICON, NAME, confidence_text, esc, feedback_keyboard, short_title, source_name, when,
+)
 
 log = logging.getLogger(__name__)
 
@@ -77,39 +81,48 @@ async def _send_chunked(text: str) -> bool:
     return ok
 
 
-def _format_article(article: ArticleMeta, company: Company) -> str:
-    emoji = SENTIMENT_EMOJI.get(article.sentiment, "⚪")
-    label = SENTIMENT_LABEL.get(article.sentiment, "")
-    score_pct = int((article.sentiment_score or 0) * 100)
-    pub = article.published_at.astimezone(
-        timezone(timedelta(hours=7))
-    ).strftime("%H:%M %d/%m")
-    title = html_lib.escape(article.title)
-    summary = article.summary or ""
-    summary_text = html_lib.escape(summary[:200] + "..." if len(summary) > 200 else summary)
+def _format_article(article: ArticleMeta, company: Company, source=None) -> str:
+    """
+    🔴 Tiêu cực · SBT · 78%
+    Tiêu đề bài (đậm)
+    Sapo ngắn
+    🔎 cụm từ căn cứ
+    Đọc bài · 19/11 20:30 · CafeF · /why_123
+    """
+    conf = confidence_text(article.sentiment_score, article.sentiment_method)
+    head = f"{ICON.get(article.sentiment, '⚪')} <b>{NAME.get(article.sentiment, '')} · {esc(company.ticker)}</b> · {conf}"
+    is_google = "news.google.com" in (article.url or "")
+    title = esc(short_title(article.title, limit=140, strip_source=is_google))
 
-    return (
-        f"{emoji} <b>[{company.ticker}] {label}</b> ({score_pct}%)\n"
-        f"<b>{title}</b>\n"
-        f"{summary_text}\n"
-        f"🕐 {pub} | <a href='{html_lib.escape(article.url)}'>Đọc bài</a>"
-    )
+    summary = re.sub(r"\s+", " ", article.summary or "").strip()
+    if len(summary) > 160:
+        summary = summary[:160].rsplit(" ", 1)[0] + "…"
+
+    phrases = (article.sentiment_evidence or {}).get("phrases") or []
+    meta = " · ".join(x for x in (when(article.published_at), source_name(source), f"/why_{article.id}") if x)
+
+    lines = [head, f"<b>{title}</b>"]
+    if summary:
+        lines.append(esc(summary))
+    if phrases:
+        lines.append(f"🔎 <i>{esc(', '.join(phrases[:4]))}</i>")
+    lines.append(f"<a href='{esc(article.url)}'>Đọc bài</a> · <i>{esc(meta)}</i>")
+    return "\n".join(lines)
 
 
-async def _send_to_chat(chat_id: int | str, text: str) -> bool:
+async def _send_to_chat(chat_id: int | str, text: str, reply_markup: dict | None = None) -> bool:
     """Gửi message đến 1 chat_id cụ thể."""
+    payload = {
+        "chat_id": chat_id,
+        "text": text,
+        "parse_mode": "HTML",
+        "disable_web_page_preview": True,
+    }
+    if reply_markup:
+        payload["reply_markup"] = reply_markup
     try:
         async with httpx.AsyncClient() as client:
-            resp = await client.post(
-                f"{API_BASE}/sendMessage",
-                json={
-                    "chat_id": chat_id,
-                    "text": text,
-                    "parse_mode": "HTML",
-                    "disable_web_page_preview": True,
-                },
-                timeout=10,
-            )
+            resp = await client.post(f"{API_BASE}/sendMessage", json=payload, timeout=10)
             resp.raise_for_status()
             return True
     except Exception as e:
@@ -117,7 +130,12 @@ async def _send_to_chat(chat_id: int | str, text: str) -> bool:
         return False
 
 
-async def _broadcast(text: str, ticker: str | None = None, sentiment: str | None = None) -> int:
+async def _broadcast(
+    text: str,
+    ticker: str | None = None,
+    sentiment: str | None = None,
+    reply_markup: dict | None = None,
+) -> int:
     """
     Gửi đến:
       1. CHAT_ID chính (group/owner) — luôn nhận
@@ -146,7 +164,7 @@ async def _broadcast(text: str, ticker: str | None = None, sentiment: str | None
 
     ok_count = 0
     for chat_id in targets:
-        if await _send_to_chat(chat_id, text):
+        if await _send_to_chat(chat_id, text, reply_markup):
             ok_count += 1
         await asyncio.sleep(0.05)  # Tránh Telegram rate limit
 
@@ -186,12 +204,13 @@ async def send_immediate(article_id: int) -> bool:
             log.debug(f"[notifier] Skip immediate alert for {company.ticker} — not in watchlist")
             return False
 
-        text = (
-            f"⚡ <b>HEADING NEWS — THE EYE</b>\n\n"
-            f"{_format_article(article, company)}"
-        )
+        source = await session.get(FeedSource, article.source_id) if article.source_id else None
+        text = _format_article(article, company, source)
 
-    sent = await _broadcast(text, ticker=company.ticker, sentiment=article.sentiment)
+    sent = await _broadcast(
+        text, ticker=company.ticker, sentiment=article.sentiment,
+        reply_markup=feedback_keyboard(article.id),
+    )
 
     if sent > 0:
         async with AsyncSessionLocal() as session:
@@ -215,11 +234,12 @@ async def send_digest() -> bool:
     cutoff_48h = datetime.now(timezone.utc) - timedelta(hours=48)
 
     async with AsyncSessionLocal() as session:
-        # Lấy POS chưa notify — chỉ bài trong 48h theo published_at
+        # Lấy TẤT CẢ POS chưa notify trong 48h (không giới hạn 2h theo fetched_at —
+        # nếu không, POS lấy về ban đêm 22h–6h sẽ không bao giờ được gửi).
+        # Gồm cả bài NEU → POS sau khi đọc toàn bài.
         pos_result = await session.execute(
             select(ArticleMeta, Company)
             .join(Company, ArticleMeta.company_id == Company.id)
-            .where(ArticleMeta.fetched_at >= since)
             .where(ArticleMeta.published_at >= cutoff_48h)
             .where(ArticleMeta.notified == False)   # noqa: E711
             .where(ArticleMeta.sentiment == "POS")
@@ -267,8 +287,8 @@ async def send_digest() -> bool:
         by_company[company.ticker]["articles"].append(article)
         by_company[company.ticker]["count"] += 1
 
-    now_vn = datetime.now(timezone(timedelta(hours=7))).strftime("%H:%M %d/%m/%Y")
-    lines = [f"📈 <b>TIN TÍCH CỰC — {now_vn}</b>\n"]
+    now_vn = datetime.now(timezone(timedelta(hours=7))).strftime("%H:%M %d/%m")
+    lines = [f"📈 <b>Tin tích cực</b> · <i>{now_vn}</i>"]
 
     article_ids_to_mark = []
 
@@ -277,24 +297,22 @@ async def send_digest() -> bool:
         articles = data["articles"]
         count = data["count"]
 
-        lines.append(
-            f"<b>【{ticker}】{html_lib.escape(company.name)}</b>  🟢 {count} tin"
-        )
-
-        for art in articles[:3]:
-            score_pct = int((art.sentiment_score or 0) * 100)
-            raw = art.title[:90] + "…" if len(art.title) > 90 else art.title
-            title = html_lib.escape(raw)
+        lines += ["", f"<b>{esc(ticker)} · {esc(company.name)}</b> — {count} tin"]
+        for i, art in enumerate(articles[:3]):
+            if i:
+                lines.append("")
+            conf = confidence_text(art.sentiment_score, art.sentiment_method)
+            title = esc(short_title(art.title, strip_source="news.google.com" in (art.url or "")))
             lines.append(
-                f"  🟢 <a href='{html_lib.escape(art.url)}'>{title}</a> ({score_pct}%)"
+                f"🟢 <a href='{esc(art.url)}'>{title}</a>\n"
+                f"<i>{when(art.published_at)} · {conf} · /why_{art.id}</i>"
             )
-
         if count > 3:
-            lines.append(f"  <i>... và {count - 3} tin khác</i>")
+            lines.append(f"<i>+ {count - 3} tin khác</i>")
 
-        lines.append("")
         article_ids_to_mark.extend(a.id for a in articles)
 
+    lines.append("\n<i>Bot chấm sai? /fix &lt;id&gt; pos|neg|neu</i>")
     full_text = "\n".join(lines)
     ok = await _send_chunked(full_text)
 

@@ -26,8 +26,10 @@ from datetime import datetime, timedelta, timezone
 from telegram import Update, BotCommand
 from telegram.ext import (
     Application,
+    CallbackQueryHandler,
     CommandHandler,
     ContextTypes,
+    MessageHandler,
     filters,
 )
 from telegram.constants import ParseMode
@@ -104,6 +106,13 @@ async def cmd_help(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
         "  /search <code>từ khóa</code> <i>[7d]</i>  — Tìm bài theo từ khóa\n"
         "  /list            — Danh sách ticker đang theo dõi\n"
         "  /export <i>[7d]</i>          — Xuất CSV về máy\n\n"
+
+        "<b>🧠 Dạy bot (tự học):</b>\n"
+        "  Bấm ✅/🟢/🔴/⚪ dưới mỗi tin để xác nhận / sửa nhãn\n"
+        "  /fix <code>1234 pos|neg|neu</code> — Sửa nhãn bài #1234\n"
+        "  /why <code>1234</code>      — Vì sao bot chấm vậy, % nghĩa là gì\n"
+        "  /learn           — Độ chính xác hiện tại của bot\n"
+        "  /learn now       — Tự học ngay (chat chính)\n\n"
 
         "<b>⚙️ Hệ thống:</b>\n"
         "  /status          — Trạng thái hệ thống\n"
@@ -264,7 +273,7 @@ async def cmd_status(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
         f"    🔴 NEG    : <b>{neg}</b>\n"
         f"    ⚪ NEU    : {neu}\n\n"
         f"  🕐 Poll cuối : {last_fetch}\n\n"
-        f"<i>👁 The-Eye by dlk — News Intelligence</i>"
+        f"<i>by dlk</i>"
     )
     await update.message.reply_text(text, parse_mode=ParseMode.HTML)
 
@@ -736,6 +745,17 @@ def build_application() -> Application:
     # Tiện ích
     app.add_handler(CommandHandler("clear",       cmd_clear))
 
+    # Tự học — người dùng dạy bot, xem giải thích & độ chính xác
+    from app.notifier.learning_commands import (
+        cb_feedback, cb_feedback_reopen, cmd_fix, cmd_learn, cmd_why,
+    )
+    app.add_handler(CallbackQueryHandler(cb_feedback,        pattern=r"^fb:"))
+    app.add_handler(CallbackQueryHandler(cb_feedback_reopen, pattern=r"^fbx:"))
+    app.add_handler(CommandHandler("fix",         cmd_fix))
+    app.add_handler(CommandHandler("why",         cmd_why))
+    app.add_handler(MessageHandler(filters.Regex(r"^/why_\d+"), cmd_why))
+    app.add_handler(CommandHandler("learn",       cmd_learn))
+
     return app
 
 
@@ -753,6 +773,9 @@ async def set_bot_commands(application: Application) -> None:
         BotCommand("list",        "Danh sách công ty đang theo dõi"),
         BotCommand("ping",        "Kiểm tra RSS feeds"),
         BotCommand("status",      "Trạng thái hệ thống"),
+        BotCommand("learn",       "Bot tự học tới đâu: độ chính xác, ý nghĩa %"),
+        BotCommand("why",         "Vì sao bot chấm 1 bài: /why 1234"),
+        BotCommand("fix",         "Sửa nhãn để dạy bot: /fix 1234 pos|neg|neu"),
         BotCommand("help",        "Hướng dẫn đầy đủ"),
     ]
     await application.bot.set_my_commands(commands)
@@ -765,7 +788,7 @@ async def start_polling(application: Application) -> None:
     await set_bot_commands(application)
     await application.start()
     await application.updater.start_polling(
-        allowed_updates=["message"],
+        allowed_updates=["message", "callback_query"],
         drop_pending_updates=True,       # bỏ qua tin nhắn cũ khi restart
     )
     log.info("[bot] Polling started")

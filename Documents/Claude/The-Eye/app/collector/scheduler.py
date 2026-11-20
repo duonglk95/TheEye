@@ -2,7 +2,8 @@
 Scheduler — gắn kết tất cả jobs:
   - Poll RSS mỗi 5 phút → classify → gửi ngay nếu NEG
   - Retry unnotified NEG mỗi 15 phút (phục hồi sau Telegram outage)
-  - Scrape full content background mỗi 10 phút
+  - Scrape full content mỗi 10 phút → ĐỌC LẠI TOÀN BÀI → báo ngay nếu thành NEG
+  - Tự học mỗi đêm 02:30 (train mô hình ML từ phản hồi người dùng + luật)
   - Gửi digest POS mỗi 2 tiếng (8h–22h)
   - Telegram Bot polling (chạy song song)
 """
@@ -63,10 +64,36 @@ async def job_retry_neg_alerts():
             await send_immediate(article_id)
 
 
-async def job_scrape_pending():
-    """Scrape full content background — phục vụ Phase 2."""
+async def job_scrape_and_deep_read():
+    """
+    Scrape thân bài → đọc lại toàn bài.
+    Tin có tiêu đề trung tính nhưng thân bài rõ tốt/xấu sẽ đổi nhãn tại đây:
+      → NEG: gửi cảnh báo ngay   → POS: vào digest kế tiếp (notified vẫn False)
+    """
     from app.collector.scraper import scrape_pending
+    from app.classifier.classifier import deep_read_pending
+    from app.notifier.telegram import send_immediate
+
     await scrape_pending(limit=20)
+    changes = await deep_read_pending(limit=50)
+    for c in changes:
+        if c.new == "NEG" and not c.notified:
+            await send_immediate(c.article_id)
+            log.info(f"Deep read: #{c.article_id} {c.old}→NEG, alert sent")
+
+
+async def job_self_learning():
+    """Vòng tự học hằng đêm; báo kết quả vào chat chính."""
+    from app.learning.trainer import format_report, run_learning
+    from app.notifier.telegram import _send
+
+    try:
+        report = await run_learning()
+    except Exception as e:
+        log.exception(f"[learn] failed: {e}")
+        return
+    if report.get("decision") in ("adopted", "rejected"):
+        await _send(format_report(report))
 
 
 async def job_send_digest():
@@ -77,6 +104,9 @@ async def job_send_digest():
 
 async def start_scheduler():
     from app.notifier.bot_handler import build_application, start_polling, stop_polling
+
+    from app.classifier.model_store import refresh_active
+    await refresh_active()      # nạp mô hình ML đã học (nếu có) trước khi phân loại
 
     scheduler = AsyncIOScheduler(timezone="Asia/Ho_Chi_Minh")
     bot_app = build_application()
@@ -101,14 +131,24 @@ async def start_scheduler():
         misfire_grace_time=60,
     )
 
-    # Scrape full content: mỗi 10 phút
+    # Scrape full content + đọc lại toàn bài: mỗi 10 phút
     scheduler.add_job(
-        job_scrape_pending,
+        job_scrape_and_deep_read,
         trigger=IntervalTrigger(minutes=10),
-        id="scrape_pending",
-        name="Scrape Article Content",
+        id="scrape_and_deep_read",
+        name="Scrape & Deep Read",
         max_instances=1,
         misfire_grace_time=120,
+    )
+
+    # Tự học: 02:30 mỗi đêm (ít tin, CPU rảnh)
+    scheduler.add_job(
+        job_self_learning,
+        trigger=CronTrigger(hour=2, minute=30),
+        id="self_learning",
+        name="Self-learning (train ML model)",
+        max_instances=1,
+        misfire_grace_time=3600,
     )
 
     # Digest POS: mỗi 2 tiếng, vào đầu giờ chẵn (8h–22h)
@@ -125,7 +165,8 @@ async def start_scheduler():
     log.info("Scheduler started.")
     log.info("  - Poll RSS & classify:  every 5 min  → NEG immediate")
     log.info("  - Retry NEG alerts:     every 15 min → outage recovery")
-    log.info("  - Scrape content:       every 10 min")
+    log.info("  - Scrape + deep read:   every 10 min → re-label from full article")
+    log.info("  - Self-learning:        daily 02:30 ICT")
     log.info("  - POS digest:           every 2h (08:00–22:00 ICT)")
 
     await start_polling(bot_app)

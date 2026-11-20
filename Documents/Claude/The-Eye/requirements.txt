@@ -19,6 +19,10 @@ apscheduler==3.10.4
 # NLP (Phase 1 — rule-based, nhẹ)
 underthesea==6.8.4
 
+# Machine learning tự học (CPU, ~100MB RAM — không cần GPU, không dùng LLM)
+scikit-learn==1.5.2
+joblib==1.4.2
+
 # Notification
 python-telegram-bot==21.9
 
@@ -26,7 +30,6 @@ python-telegram-bot==21.9
 textual==0.89.1
 
 # --- Phase 2 (cài thêm khi training, không cần trên Railway) ---
-# anthropic==0.40.0     ← Claude Haiku auto-labeling
 # transformers==4.46.3
 # torch==2.5.1
 # datasets==3.2.0

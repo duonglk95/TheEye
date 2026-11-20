@@ -24,10 +24,12 @@ log = logging.getLogger("the-eye")
 async def run_service():
     """Chế độ background service — dùng trên Railway."""
     from app.db import ping
+    from app.db.migrate import apply_migrations
     from app.collector.scheduler import start_scheduler
     log.info("Starting The-Eye service...")
     await ping()
     log.info("Database connected.")
+    await apply_migrations()
     await start_scheduler()
 
 
