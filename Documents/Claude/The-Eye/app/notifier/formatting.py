@@ -72,24 +72,30 @@ def when(dt) -> str:
     return dt.astimezone(VN_TZ).strftime("%d/%m %H:%M") if dt else ""
 
 
-def article_item(art, src=None, show_conf: bool = True, ticker: str | None = None) -> str:
+def article_item(art, src=None, index: int | None = None, ticker: str | None = None, **_ignored) -> str:
     """
-    🟢 Tiêu đề bài (link)
-    SBT · 19/11 20:30 · CafeF · 82% · /why_123
+    1. 🟢 Tiêu đề bài (link)
+    SBT · 19/11 20:30 · CafeF
+    (số thứ tự khớp với hàng mặt cười bên dưới tin nhắn)
     """
     is_google = "google" in (getattr(src, "name", "") or "").lower() or "news.google.com" in (art.url or "")
     title = esc(short_title(art.title, strip_source=is_google))
-    meta = [x for x in (
-        ticker,
-        when(art.published_at),
-        source_name(src),
-        confidence_text(art.sentiment_score, art.sentiment_method) if show_conf else None,
-        f"/why_{art.id}",
-    ) if x]
+    meta = [x for x in (ticker, when(art.published_at), source_name(src)) if x]
+    num = f"<b>{index}.</b> " if index else ""
     return (
-        f"{ICON.get(art.sentiment, '⚪')} <a href='{esc(art.url)}'>{title}</a>\n"
+        f"{num}{ICON.get(art.sentiment, '⚪')} <a href='{esc(art.url)}'>{title}</a>\n"
         f"<i>{esc(' · '.join(meta))}</i>"
     )
+
+
+class Report(str):
+    """Chuỗi HTML của báo cáo + danh sách id bài (theo số thứ tự) để gắn hàng mặt cười."""
+    article_ids: list[int]
+
+    def __new__(cls, text: str, article_ids: list[int] | None = None):
+        obj = super().__new__(cls, text)
+        obj.article_ids = list(article_ids or [])
+        return obj
 
 
 def counts_line(pos: int, neg: int, neu: int) -> str:

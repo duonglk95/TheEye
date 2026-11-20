@@ -22,7 +22,9 @@ HUMAN_PREFIX = "human:"
 VALID = {"POS", "NEG", "NEU"}
 
 
-async def record_feedback(article_id: int, label: str, user_id: int, username: str | None = None) -> ArticleMeta | None:
+async def record_feedback(
+    article_id: int, label: str, user_id: int, username: str | None = None, rating: int | None = None,
+) -> ArticleMeta | None:
     """Ghi nhận nhãn đúng cho 1 bài. Trả về bài (đã cập nhật) hoặc None nếu không có bài."""
     label = label.upper()
     if label not in VALID:
@@ -36,11 +38,11 @@ async def record_feedback(article_id: int, label: str, user_id: int, username: s
 
         stmt = pg_insert(TrainingLabel).values(
             article_id=article_id, label=label, labeler=f"{HUMAN_PREFIX}{user_id}",
-            confidence=1.0, created_at=now,
+            confidence=1.0, created_at=now, rating=rating,
         )
         await session.execute(stmt.on_conflict_do_update(
             index_elements=["article_id", "labeler"],
-            set_={"label": label, "created_at": now},
+            set_={"label": label, "created_at": now, "rating": rating},
         ))
 
         evidence = dict(article.sentiment_evidence or {})

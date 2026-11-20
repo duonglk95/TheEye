@@ -50,6 +50,12 @@ from app.notifier.alert_config import (
 
 log = logging.getLogger(__name__)
 
+
+def _rating_markup(report):
+    """Hàng nút 🔴 Xấu / ⚪ Thường / 🟢 Tốt cho các bài trong báo cáo (nếu có)."""
+    from app.notifier.rating import keyboard, to_telegram_markup
+    return to_telegram_markup(keyboard(getattr(report, "article_ids", [])))
+
 BOT_TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
 
 # Ticker aliases nhanh
@@ -153,6 +159,7 @@ async def cmd_report(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
         report,
         parse_mode=ParseMode.HTML,
         disable_web_page_preview=True,
+        reply_markup=_rating_markup(report),
     )
     log.info(f"[bot] /report {ticker} {hours}h → sent to chat {update.effective_chat.id}")
 
@@ -170,6 +177,7 @@ async def cmd_all(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
         report,
         parse_mode=ParseMode.HTML,
         disable_web_page_preview=True,
+        reply_markup=_rating_markup(report),
     )
 
 
@@ -199,6 +207,7 @@ async def cmd_top(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
         report,
         parse_mode=ParseMode.HTML,
         disable_web_page_preview=True,
+        reply_markup=_rating_markup(report),
     )
 
 
@@ -309,6 +318,7 @@ async def cmd_search(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
         result,
         parse_mode=ParseMode.HTML,
         disable_web_page_preview=True,
+        reply_markup=_rating_markup(result),
     )
 
 
@@ -716,8 +726,13 @@ def build_application() -> Application:
     app = Application.builder().token(BOT_TOKEN).build()
 
     # Tra cứu
-    app.add_handler(CommandHandler("start",       cmd_subscribe))
-    app.add_handler(CommandHandler("help",        cmd_help))
+    # Menu nút bấm — điểm vào chính cho người dùng
+    from app.notifier.menu import BUTTON_PATTERN, cmd_menu, on_button
+    app.add_handler(CommandHandler("start",       cmd_menu))
+    app.add_handler(CommandHandler("menu",        cmd_menu))
+    app.add_handler(CommandHandler("help",        cmd_menu))
+    app.add_handler(CommandHandler("commands",    cmd_help))     # danh sách lệnh đầy đủ (ẩn)
+    app.add_handler(MessageHandler(filters.Regex(BUTTON_PATTERN), on_button))  # bàn phím nút cố định
     app.add_handler(CommandHandler("report",      cmd_report))
     app.add_handler(CommandHandler("all",         cmd_all))
     app.add_handler(CommandHandler("status",      cmd_status))
@@ -747,9 +762,11 @@ def build_application() -> Application:
 
     # Tự học — người dùng dạy bot, xem giải thích & độ chính xác
     from app.notifier.learning_commands import (
-        cb_feedback, cb_feedback_reopen, cmd_fix, cmd_learn, cmd_why,
+        cb_feedback, cb_feedback_reopen, cb_noop, cb_rate, cmd_fix, cmd_learn, cmd_why,
     )
-    app.add_handler(CallbackQueryHandler(cb_feedback,        pattern=r"^fb:"))
+    app.add_handler(CallbackQueryHandler(cb_rate,            pattern=r"^r:"))
+    app.add_handler(CallbackQueryHandler(cb_noop,            pattern=r"^rn:"))
+    app.add_handler(CallbackQueryHandler(cb_feedback,        pattern=r"^fb:"))   # nút kiểu cũ
     app.add_handler(CallbackQueryHandler(cb_feedback_reopen, pattern=r"^fbx:"))
     app.add_handler(CommandHandler("fix",         cmd_fix))
     app.add_handler(CommandHandler("why",         cmd_why))
@@ -760,23 +777,13 @@ def build_application() -> Application:
 
 
 async def set_bot_commands(application: Application) -> None:
-    """Đăng ký danh sách lệnh hiện trên Telegram UI."""
+    """
+    Danh sách lệnh hiện trên Telegram — chỉ giữ thứ người dùng cần.
+    Các lệnh khác (/all, /top, /search, /only, /status, /learn, /why, /fix...) vẫn hoạt động nhưng ẩn.
+    """
     commands = [
-        BotCommand("subscribe",   "Đăng ký nhận thông báo cá nhân vào DM"),
-        BotCommand("unsubscribe", "Tắt thông báo cá nhân"),
-        BotCommand("myalerts",    "Xem & chỉnh cấu hình thông báo của bạn"),
-        BotCommand("report",      "Báo cáo công ty: /report VIC [24h|48h|7d]"),
-        BotCommand("all",         "Tổng quan tất cả công ty"),
-        BotCommand("top",         "Top tin: /top pos|neg [7d]"),
-        BotCommand("search",      "Tìm bài: /search từ khóa [7d]"),
-        BotCommand("export",      "Xuất CSV dữ liệu"),
-        BotCommand("list",        "Danh sách công ty đang theo dõi"),
-        BotCommand("ping",        "Kiểm tra RSS feeds"),
-        BotCommand("status",      "Trạng thái hệ thống"),
-        BotCommand("learn",       "Bot tự học tới đâu: độ chính xác, ý nghĩa %"),
-        BotCommand("why",         "Vì sao bot chấm 1 bài: /why 1234"),
-        BotCommand("fix",         "Sửa nhãn để dạy bot: /fix 1234 pos|neg|neu"),
-        BotCommand("help",        "Hướng dẫn đầy đủ"),
+        BotCommand("menu",   "Hiện bàn phím nút: xem tin từng công ty"),
+        BotCommand("report", "Tin 1 công ty: /report NAF (thêm 7d để xem 7 ngày)"),
     ]
     await application.bot.set_my_commands(commands)
     log.info("[bot] Commands registered on Telegram")

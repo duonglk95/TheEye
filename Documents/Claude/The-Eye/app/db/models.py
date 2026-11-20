@@ -99,8 +99,9 @@ class TrainingLabel(Base):
     article_id = Column(BigInteger, ForeignKey("article_meta.id"), nullable=False)
     label = Column(String(5), nullable=False)       # NEU | POS | NEG
     category = Column(String(50))                   # từ training_categories trong sentiment.yaml
-    labeler = Column(String(50))                    # manual | rule_v1 | phobert_v1
+    labeler = Column(String(50))                    # human:<telegram_id> | ...
     confidence = Column(Float)
+    rating = Column(Integer)                        # 1–5 khi người dùng chấm bằng mặt cười
     created_at = Column(TIMESTAMP(timezone=True), default=datetime.utcnow)
 
     article = relationship("ArticleMeta", back_populates="training_labels")

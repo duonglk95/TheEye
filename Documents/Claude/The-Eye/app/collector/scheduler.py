@@ -83,17 +83,15 @@ async def job_scrape_and_deep_read():
 
 
 async def job_self_learning():
-    """Vòng tự học hằng đêm; báo kết quả vào chat chính."""
-    from app.learning.trainer import format_report, run_learning
-    from app.notifier.telegram import _send
+    """Vòng tự học hằng đêm — chạy ngầm, chỉ ghi log (không gửi vào group)."""
+    from app.learning.trainer import run_learning
 
     try:
         report = await run_learning()
+        log.info(f"[learn] v{report.get('version')} {report.get('decision')}: "
+                 f"{report.get('note') or report.get('reason', '')}")
     except Exception as e:
         log.exception(f"[learn] failed: {e}")
-        return
-    if report.get("decision") in ("adopted", "rejected"):
-        await _send(format_report(report))
 
 
 async def job_send_digest():
