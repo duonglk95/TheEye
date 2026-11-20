@@ -82,6 +82,12 @@ async def job_scrape_and_deep_read():
             log.info(f"Deep read: #{c.article_id} {c.old}→NEG, alert sent")
 
 
+async def job_send_digest():
+    """Gửi digest POS tổng hợp 2 tiếng/lần."""
+    from app.notifier.telegram import send_digest
+    await send_digest()
+
+
 async def start_scheduler():
     from app.notifier.bot_handler import build_application, start_polling, stop_polling
 
