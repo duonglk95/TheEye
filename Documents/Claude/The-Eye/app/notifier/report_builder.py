@@ -7,8 +7,9 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy import select, func
 from app.db import AsyncSessionLocal
 from app.notifier.formatting import (
-    article_item, confidence_text, counts_line, esc, footer, mood_line,
+    Report, article_item, counts_line, esc, footer, mood_line,
 )
+from app.notifier.rating import MAX_ROWS
 from app.db.models import ArticleMeta, Company, FeedSource
 
 VN_TZ = timezone(timedelta(hours=7))
@@ -120,22 +121,24 @@ async def build_company_report(ticker: str, hours: int = 24) -> str:
         mood_line(pos_c, neg_c),
     ]
 
-    sections = [("📈 <b>Tích cực</b>", pos_rows, pos_c, True),
-                ("📉 <b>Tiêu cực</b>", neg_rows, neg_c, True),
-                ("📋 <b>Trung lập</b>", neu_rows, neu_c, False)]
-    for heading, rows, total_in_group, show_conf in sections:
+    sections = [("📈 <b>Tích cực</b>", pos_rows, pos_c),
+                ("📉 <b>Tiêu cực</b>", neg_rows, neg_c),
+                ("📋 <b>Trung lập</b>", neu_rows, neu_c)]
+    ids: list[int] = []
+    for heading, rows, total_in_group in sections:
         if not rows:
             continue
         lines += ["", heading]
         for i, (art, src) in enumerate(rows):
             if i:
                 lines.append("")
-            lines.append(article_item(art, src, show_conf=show_conf))
+            ids.append(art.id)
+            lines.append(article_item(art, src, index=len(ids)))
         if total_in_group > len(rows):
             lines.append(f"<i>+ {total_in_group - len(rows)} tin khác</i>")
 
-    lines.append(footer(f"/report {company.ticker} 7d"))
-    return "\n".join(lines)
+    lines.append(footer())
+    return Report("\n".join(lines), ids)
 
 
 async def build_overview_report(hours: int = 24) -> str:
@@ -214,9 +217,9 @@ async def search_articles(keyword: str, hours: int = 48, limit: int = 8) -> str:
     for i, (art, company) in enumerate(rows):
         if i:
             lines.append("")
-        lines.append(article_item(art, None, ticker=company.ticker))
-    lines.append(footer(f"/search {keyword} 7d"))
-    return "\n".join(lines)
+        lines.append(article_item(art, None, index=i + 1 if i < MAX_ROWS else None, ticker=company.ticker))
+    lines.append(footer())
+    return Report("\n".join(lines), [art.id for art, _ in rows])
 
 
 async def build_top_report(sentiment: str, hours: int = 24, limit: int = 5) -> str:
@@ -247,7 +250,7 @@ async def build_top_report(sentiment: str, hours: int = 24, limit: int = 5) -> s
         f"<i>cập nhật {now_str}</i>",
     ]
     for i, (art, company, src) in enumerate(rows, 1):
-        lines += ["", f"<b>{i}.</b> " + article_item(art, src, ticker=company.ticker)]
+        lines += ["", article_item(art, src, index=i, ticker=company.ticker)]
 
-    lines.append(footer("/top pos", "/top neg"))
-    return "\n".join(lines)
+    lines.append(footer())
+    return Report("\n".join(lines), [art.id for art, _, _ in rows])

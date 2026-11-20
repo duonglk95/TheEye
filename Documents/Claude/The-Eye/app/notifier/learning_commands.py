@@ -252,3 +252,35 @@ async def cmd_learn(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
         await update.message.reply_text(format_report(report), parse_mode=ParseMode.HTML)
         return
     await update.message.reply_text(await learning_status(), parse_mode=ParseMode.HTML)
+
+
+# ─── Chấm 1 chạm (🔴 Xấu / ⚪ Thường / 🟢 Tốt) ───────────────────
+
+async def cb_rate(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+    from app.notifier.rating import (
+        CB_RE, FACE, ids_from_markup, keyboard, rating_to_label, to_telegram_markup, vote_counts,
+    )
+
+    query = update.callback_query
+    m = CB_RE.fullmatch(query.data or "")
+    if not m:
+        await query.answer()
+        return
+    article_id, rating = int(m.group(1)), int(m.group(2))
+    uid, uname = _user(update)
+    art = await record_feedback(article_id, rating_to_label(rating), uid, uname, rating=rating)
+    if art is None:
+        await query.answer("Không tìm thấy bài", show_alert=True)
+        return
+    await query.answer(f"Đã ghi nhận {FACE[rating]} — cảm ơn bạn!")
+
+    ids = ids_from_markup(query.message.reply_markup) or [article_id]
+    try:
+        await query.edit_message_reply_markup(to_telegram_markup(keyboard(ids, await vote_counts(ids))))
+    except Exception as e:      # "message is not modified" khi chạm lại cùng nút
+        log.debug(f"edit markup skipped: {e}")
+
+
+async def cb_noop(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+    """Nút số thứ tự bài — không làm gì."""
+    await update.callback_query.answer()

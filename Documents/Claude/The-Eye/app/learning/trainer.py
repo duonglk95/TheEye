@@ -35,7 +35,8 @@ from app.learning.feedback import HUMAN_PREFIX
 
 log = logging.getLogger(__name__)
 
-GOLD_WEIGHT = 3.0
+GOLD_WEIGHT = 3.0             # nhãn chắc chắn (😡/🤩, nút cũ, /fix)
+GOLD_MILD_WEIGHT = 2.0        # 🙁 / 😐 / 🙂
 SILVER_WEIGHT = 1.0
 PSEUDO_WEIGHT = 0.5
 SILVER_MIN_MARGIN = 1.5        # chênh lệch điểm POS-NEG tối thiểu để tin luật
@@ -72,24 +73,34 @@ def silver_label(reading) -> str | None:
     return None
 
 
-def _gold_by_article(rows) -> dict[int, str]:
-    """Nhiều người cùng chấm 1 bài → lấy đa số; hoà thì lấy nhãn mới nhất."""
-    votes: dict[int, list[tuple[str, object]]] = defaultdict(list)
-    for article_id, label, created_at in rows:
-        votes[article_id].append((label, created_at))
+def _vote_weight(rating: int | None) -> float:
+    return GOLD_WEIGHT if rating in (None, 1, 5) else GOLD_MILD_WEIGHT
+
+
+def _gold_by_article(rows) -> dict[int, tuple[str, float]]:
+    """
+    Nhiều người cùng chấm 1 bài → lấy đa số; hoà thì lấy nhãn mới nhất.
+    Trọng số = trung bình độ chắc của các phiếu cùng nhãn thắng (😡/🤩 nặng hơn 🙁/🙂).
+    rows: (article_id, label, created_at, rating)
+    """
+    votes: dict[int, list[tuple]] = defaultdict(list)
+    for article_id, label, created_at, rating in rows:
+        votes[article_id].append((label, created_at, rating))
     out = {}
     for aid, vs in votes.items():
-        counts = Counter(l for l, _ in vs)
+        counts = Counter(v[0] for v in vs)
         top = max(counts.values())
         tied = {l for l, c in counts.items() if c == top}
-        out[aid] = max((v for v in vs if v[0] in tied), key=lambda v: v[1] or 0)[0]
+        label = max((v for v in vs if v[0] in tied), key=lambda v: v[1] or 0)[0]
+        weights = [_vote_weight(v[2]) for v in vs if v[0] == label]
+        out[aid] = (label, sum(weights) / len(weights))
     return out
 
 
 async def build_dataset(current: ml_model.ModelBundle | None) -> tuple[list[Sample], dict]:
     async with AsyncSessionLocal() as session:
         gold_rows = await session.execute(
-            select(TrainingLabel.article_id, TrainingLabel.label, TrainingLabel.created_at)
+            select(TrainingLabel.article_id, TrainingLabel.label, TrainingLabel.created_at, TrainingLabel.rating)
             .where(TrainingLabel.labeler.like(f"{HUMAN_PREFIX}%"))
         )
         gold = _gold_by_article(gold_rows.all())
@@ -115,7 +126,8 @@ async def build_dataset(current: ml_model.ModelBundle | None) -> tuple[list[Samp
         reading = read_article(title, summary, content)
         text = build_text(title, summary, content, _rule_hits(reading))
         if aid in gold:
-            samples.append(Sample(aid, text, gold[aid], GOLD_WEIGHT, "gold"))
+            label, weight = gold[aid]
+            samples.append(Sample(aid, text, label, weight, "gold"))
             continue
         lbl = silver_label(reading)
         if lbl:

@@ -18,8 +18,10 @@ from app.db import AsyncSessionLocal
 from app.db.models import ArticleMeta, Company, FeedSource
 from app.notifier.alert_config import is_ticker_watched
 from app.notifier.formatting import (
-    ICON, NAME, confidence_text, esc, feedback_keyboard, short_title, source_name, when,
+    ICON, NAME, confidence_text, esc, short_title, source_name, when,
 )
+from app.notifier.rating import MAX_ROWS as RATING_MAX_ROWS
+from app.notifier.rating import keyboard as rating_keyboard
 
 log = logging.getLogger(__name__)
 
@@ -31,20 +33,19 @@ SENTIMENT_EMOJI = {"POS": "🟢", "NEG": "🔴", "NEU": "⚪"}
 SENTIMENT_LABEL = {"POS": "TÍCH CỰC", "NEG": "TIÊU CỰC", "NEU": "TRUNG LẬP"}
 
 
-async def _send(text: str, parse_mode: str = "HTML") -> bool:
-    """Gửi một message Telegram, trả về True nếu thành công."""
+async def _send(text: str, parse_mode: str = "HTML", reply_markup: dict | None = None) -> bool:
+    """Gửi một message Telegram vào chat chính, trả về True nếu thành công."""
+    payload = {
+        "chat_id": CHAT_ID,
+        "text": text,
+        "parse_mode": parse_mode,
+        "disable_web_page_preview": True,
+    }
+    if reply_markup:
+        payload["reply_markup"] = reply_markup
     try:
         async with httpx.AsyncClient() as client:
-            resp = await client.post(
-                f"{API_BASE}/sendMessage",
-                json={
-                    "chat_id": CHAT_ID,
-                    "text": text,
-                    "parse_mode": parse_mode,
-                    "disable_web_page_preview": True,
-                },
-                timeout=10,
-            )
+            resp = await client.post(f"{API_BASE}/sendMessage", json=payload, timeout=10)
             resp.raise_for_status()
             return True
     except Exception as e:
@@ -52,13 +53,13 @@ async def _send(text: str, parse_mode: str = "HTML") -> bool:
         return False
 
 
-async def _send_chunked(text: str) -> bool:
+async def _send_chunked(text: str, reply_markup: dict | None = None) -> bool:
     """
     Gửi text dài bằng cách tách thành nhiều message ≤4000 ký tự.
-    Tách theo dòng để không bị cắt giữa chừng.
+    Tách theo dòng để không bị cắt giữa chừng. Bàn phím gắn vào message cuối.
     """
     if len(text) <= 4000:
-        return await _send(text)
+        return await _send(text, reply_markup=reply_markup)
 
     lines = text.split("\n")
     chunks, current, current_len = [], [], 0
@@ -75,8 +76,8 @@ async def _send_chunked(text: str) -> bool:
         chunks.append("\n".join(current))
 
     ok = True
-    for chunk in chunks:
-        ok = ok and await _send(chunk)
+    for i, chunk in enumerate(chunks):
+        ok = ok and await _send(chunk, reply_markup=reply_markup if i == len(chunks) - 1 else None)
         await asyncio.sleep(0.5)  # Telegram rate limit
     return ok
 
@@ -86,11 +87,13 @@ def _format_article(article: ArticleMeta, company: Company, source=None) -> str:
     🔴 Tiêu cực · SBT · 78%
     Tiêu đề bài (đậm)
     Sapo ngắn
-    🔎 cụm từ căn cứ
-    Đọc bài · 19/11 20:30 · CafeF · /why_123
+    Đọc bài · 19/11 20:30 · CafeF
+    (bên dưới: hàng mặt cười để chấm 1 chạm)
     """
-    conf = confidence_text(article.sentiment_score, article.sentiment_method)
-    head = f"{ICON.get(article.sentiment, '⚪')} <b>{NAME.get(article.sentiment, '')} · {esc(company.ticker)}</b> · {conf}"
+    # Chỉ hiện % khi đã là xác suất được kiểm chứng (mô hình tự học); luật từ khoá thì không hiện
+    method = article.sentiment_method or ""
+    conf = f" · {confidence_text(article.sentiment_score, method)}" if method.startswith("ml_") else ""
+    head = f"{ICON.get(article.sentiment, '⚪')} <b>{NAME.get(article.sentiment, '')} · {esc(company.ticker)}</b>{conf}"
     is_google = "news.google.com" in (article.url or "")
     title = esc(short_title(article.title, limit=140, strip_source=is_google))
 
@@ -98,14 +101,11 @@ def _format_article(article: ArticleMeta, company: Company, source=None) -> str:
     if len(summary) > 160:
         summary = summary[:160].rsplit(" ", 1)[0] + "…"
 
-    phrases = (article.sentiment_evidence or {}).get("phrases") or []
-    meta = " · ".join(x for x in (when(article.published_at), source_name(source), f"/why_{article.id}") if x)
+    meta = " · ".join(x for x in (when(article.published_at), source_name(source)) if x)
 
     lines = [head, f"<b>{title}</b>"]
     if summary:
         lines.append(esc(summary))
-    if phrases:
-        lines.append(f"🔎 <i>{esc(', '.join(phrases[:4]))}</i>")
     lines.append(f"<a href='{esc(article.url)}'>Đọc bài</a> · <i>{esc(meta)}</i>")
     return "\n".join(lines)
 
@@ -209,7 +209,7 @@ async def send_immediate(article_id: int) -> bool:
 
     sent = await _broadcast(
         text, ticker=company.ticker, sentiment=article.sentiment,
-        reply_markup=feedback_keyboard(article.id),
+        reply_markup=rating_keyboard([article.id]),
     )
 
     if sent > 0:
@@ -291,6 +291,7 @@ async def send_digest() -> bool:
     lines = [f"📈 <b>Tin tích cực</b> · <i>{now_vn}</i>"]
 
     article_ids_to_mark = []
+    rated_ids: list[int] = []      # bài được đánh số & có hàng mặt cười
 
     for ticker, data in by_company.items():
         company = data["company"]
@@ -301,20 +302,22 @@ async def send_digest() -> bool:
         for i, art in enumerate(articles[:3]):
             if i:
                 lines.append("")
-            conf = confidence_text(art.sentiment_score, art.sentiment_method)
+            num = ""
+            if len(rated_ids) < RATING_MAX_ROWS:
+                rated_ids.append(art.id)
+                num = f"<b>{len(rated_ids)}.</b> "
             title = esc(short_title(art.title, strip_source="news.google.com" in (art.url or "")))
             lines.append(
-                f"🟢 <a href='{esc(art.url)}'>{title}</a>\n"
-                f"<i>{when(art.published_at)} · {conf} · /why_{art.id}</i>"
+                f"{num}🟢 <a href='{esc(art.url)}'>{title}</a>\n"
+                f"<i>{when(art.published_at)}</i>"
             )
         if count > 3:
             lines.append(f"<i>+ {count - 3} tin khác</i>")
 
         article_ids_to_mark.extend(a.id for a in articles)
 
-    lines.append("\n<i>Bot chấm sai? /fix &lt;id&gt; pos|neg|neu</i>")
     full_text = "\n".join(lines)
-    ok = await _send_chunked(full_text)
+    ok = await _send_chunked(full_text, reply_markup=rating_keyboard(rated_ids))
 
     if ok and article_ids_to_mark:
         async with AsyncSessionLocal() as session:

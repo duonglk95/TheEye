@@ -576,34 +576,26 @@ negative:
    Nếu đọc toàn bài thấy 🔴, bot gửi cảnh báo ngay.
    *(Bài từ Google News không tải được nội dung vì link là trang chuyển hướng — chỉ đọc tiêu đề.)*
 
-### Bao tự học thế nào? (không dùng LLM)
+### Dùng bot không cần gõ lệnh
 
-- Dưới mỗi cảnh báo có nút **✅ Đúng / 🟢 / 🔴 / ⚪**. Mỗi lần bấm là dạy bot 1 bài. Hoặc gõ `/fix 1234 pos`.
-- **02:30 mỗi đêm**, bot train mô hình **TF-IDF + Logistic Regression** (scikit-learn, chạy CPU, ~100MB RAM) từ:
-  - 👤 nhãn người dùng (quan trọng nhất),
-  - 📏 các bài mà luật từ khoá đọc toàn bài thấy rõ ràng,
-  - 🔁 các bài chính mô hình rất chắc chắn (chỉ bật khi mô hình đã được kiểm chứng tốt).
-- Mô hình mới **chỉ được dùng nếu kiểm tra trên bài chưa từng học cho kết quả ≥ mô hình cũ**; nếu kém hơn thì giữ mô hình cũ.
-- Mô hình học được cả những cụm từ luật không có (VD "huân chương", "ghi nhận đóng góp").
+Bấm **Start** (hoặc gõ `/menu` một lần), bàn phím gõ chữ được thay bằng các nút luôn hiện sẵn:
+`📊 SBT` `📊 DGC` `📊 NAF` `📊 VIC` `📊 CTD` · `📋 Tổng quan` `🟢 Tin tốt` `🔴 Tin xấu` · `🔔 Bật/🔕 Tắt thông báo` (chat riêng).
+Chạm 1 nút là ra báo cáo 24h.
 
-### Con số % nghĩa là gì?
+> Trong group: cần tắt Privacy Mode (BotFather → `/setprivacy` → Disable) để bot thấy nút được chạm.
 
-| Hiển thị | Ý nghĩa |
-|---|---|
-| `82%` | Mô hình tự học, **đã hiệu chỉnh**: trong 100 bài bot chấm ~82%, khoảng 82 bài đúng nhãn. Được kiểm chứng trên bài bot chưa từng học. |
-| `~50%` | Chưa có mô hình — **ước lượng theo từ khoá, chưa kiểm chứng**: 1 từ khoá ≈ 50%, nhiều bằng chứng cùng chiều thì cao hơn. |
-| `✔ đã xác nhận` | Người dùng đã xác nhận nhãn. |
+### Dạy Bao: chấm tin 1 chạm
 
-Bot không bao giờ hiện 100%.
+Dưới mỗi tin (cảnh báo, bản tin, báo cáo) có hàng nút **🔴 Xấu · ⚪ Thường · 🟢 Tốt**.
+Chạm 1 lần là xong; nút hiện số người đã chọn (VD `🟢 Tốt 2`). Tin nhắn có nhiều bài thì mỗi bài 1 hàng, đánh số khớp với số trong tin.
 
-### Lệnh liên quan
+Mỗi đêm 02:30 Bao tự học (scikit-learn, không dùng LLM) từ các lượt chấm này và chỉ dùng mô hình mới nếu nó tốt hơn bản cũ. Quá trình này chạy ngầm, không gửi thông báo vào group.
 
-| Lệnh | Tác dụng |
-|---|---|
-| `/why 1234` (hoặc bấm `/why_1234` dưới tin) | Vì sao bot chấm bài này, căn cứ là cụm từ nào, % kiểm chứng ra sao |
-| `/fix 1234 pos\|neg\|neu` | Sửa nhãn để dạy bot |
-| `/learn` | Độ chính xác hiện tại, bảng "bot nói X% → thực tế đúng Y%" |
-| `/learn now` | Tự học ngay (chỉ chat chính) |
+### Con số %
+
+Chỉ hiện ở tin cảnh báo **khi Bao đã tự học**: `82%` nghĩa là trong 100 tin Bao chấm ~82%, khoảng 82 tin đúng (đã kiểm chứng trên tin Bao chưa từng học). Trước đó không hiện %.
+
+Lệnh nâng cao (ẩn khỏi menu): `/why 1234` (vì sao chấm vậy), `/learn` (độ chính xác), `/fix 1234 pos|neg|neu`, `/commands` (danh sách đầy đủ).
 
 > Cần ít nhất ~40 bài có nhãn rõ để train lần đầu. Trước đó bot dùng từ khoá (hiện `~%`).
 
