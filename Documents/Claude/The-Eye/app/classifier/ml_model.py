@@ -62,7 +62,7 @@ class Sample:
     text: str
     label: str
     weight: float = 1.0
-    source: str = "silver"      # gold (người dùng xác nhận) | silver (luật đọc toàn bài) | pseudo
+    source: str = "silver"      # gold (người chấm) | llm (Claude chấm hộ) | silver (luật đọc toàn bài) | pseudo
 
 
 def is_validation(article_id: int, ratio: int = 5) -> bool:
@@ -237,7 +237,7 @@ def train(samples: list[Sample], version: int, c_grid=(0.5, 2.0, 8.0)) -> tuple[
     va = [s for s in samples if is_validation(s.article_id)]
     counts = {l: sum(1 for s in tr if s.label == l) for l in LABELS}
     report = {"n_train": len(tr), "n_val": len(va), "train_counts": counts,
-              "sources": {src: sum(1 for s in samples if s.source == src) for src in ("gold", "silver", "pseudo")}}
+              "sources": {src: sum(1 for s in samples if s.source == src) for src in ("gold", "llm", "silver", "pseudo")}}
 
     if len(tr) < MIN_TRAIN or len(va) < MIN_VAL or sum(1 for v in counts.values() if v >= MIN_PER_CLASS) < 2:
         report["reason"] = (f"Chưa đủ dữ liệu: cần ≥{MIN_TRAIN} bài train, ≥{MIN_VAL} bài kiểm định, "

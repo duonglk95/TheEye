@@ -32,11 +32,13 @@ from app.classifier.rule_based import read_article
 from app.db import AsyncSessionLocal
 from app.db.models import ArticleContent, ArticleMeta, TrainingLabel
 from app.learning.feedback import HUMAN_PREFIX
+from app.learning.label_export import LLM_PREFIX
 
 log = logging.getLogger(__name__)
 
 GOLD_WEIGHT = 3.0             # nhãn chắc chắn (😡/🤩, nút cũ, /fix)
-GOLD_MILD_WEIGHT = 2.0        # 🙁 / 😐 / 🙂
+GOLD_MILD_WEIGHT = 2.0        # mức nhẹ (rating 2/4) nếu sau này có
+LLM_WEIGHT = 1.5              # nhãn Claude chấm hộ qua Scheduled Task: tin hơn luật, kém người chấm
 SILVER_WEIGHT = 1.0
 PSEUDO_WEIGHT = 0.5
 SILVER_MIN_MARGIN = 1.5        # chênh lệch điểm POS-NEG tối thiểu để tin luật
@@ -105,14 +107,31 @@ async def build_dataset(current: ml_model.ModelBundle | None) -> tuple[list[Samp
         )
         gold = _gold_by_article(gold_rows.all())
 
-        rows = await session.execute(
-            select(ArticleMeta.id, ArticleMeta.title, ArticleMeta.summary,
-                   func.left(ArticleContent.content_raw, 6000))
+        llm_rows = await session.execute(
+            select(TrainingLabel.article_id, TrainingLabel.label, TrainingLabel.created_at)
+            .where(TrainingLabel.labeler.like(f"{LLM_PREFIX}%"))
+            .order_by(TrainingLabel.created_at)
+        )
+        llm = {aid: label for aid, label, _ in llm_rows.all()}     # mới nhất ghi đè
+
+        cols = (ArticleMeta.id, ArticleMeta.title, ArticleMeta.summary, func.left(ArticleContent.content_raw, 6000))
+        recent = await session.execute(
+            select(*cols)
             .outerjoin(ArticleContent, ArticleContent.article_id == ArticleMeta.id)
             .order_by(ArticleMeta.id.desc())
             .limit(MAX_ARTICLES)
         )
-        articles = rows.all()
+        articles = recent.all()
+        # Bài có nhãn (người / LLM) nhưng cũ hơn cửa sổ gần đây → vẫn đưa vào
+        seen = {a[0] for a in articles}
+        missing = [aid for aid in set(gold) | set(llm) if aid not in seen]
+        if missing:
+            older = await session.execute(
+                select(*cols)
+                .outerjoin(ArticleContent, ArticleContent.article_id == ArticleMeta.id)
+                .where(ArticleMeta.id.in_(missing))
+            )
+            articles += older.all()
 
     pseudo_on = bool(
         current is not None
@@ -128,6 +147,9 @@ async def build_dataset(current: ml_model.ModelBundle | None) -> tuple[list[Samp
         if aid in gold:
             label, weight = gold[aid]
             samples.append(Sample(aid, text, label, weight, "gold"))
+            continue
+        if aid in llm:
+            samples.append(Sample(aid, text, llm[aid], LLM_WEIGHT, "llm"))
             continue
         lbl = silver_label(reading)
         if lbl:
@@ -148,7 +170,7 @@ async def build_dataset(current: ml_model.ModelBundle | None) -> tuple[list[Samp
         picked.sort(key=lambda x: -x[3])
         samples += [Sample(aid, text, lbl, PSEUDO_WEIGHT, "pseudo") for aid, text, lbl, _ in picked[:cap]]
 
-    info = {"articles_scanned": len(articles), "gold": len(gold), "pseudo_enabled": pseudo_on}
+    info = {"articles_scanned": len(articles), "gold": len(gold), "llm": len(llm), "pseudo_enabled": pseudo_on}
     return samples, info
 
 
@@ -212,7 +234,7 @@ def format_report(report: dict) -> str:
     icon = {"adopted": "✅", "rejected": "↩️"}.get(report.get("decision"), "")
     lines = [
         f"🧠 <b>TỰ HỌC v{v}</b> {icon} {report.get('note', '')}",
-        f"Dữ liệu: 👤 {src.get('gold', 0)} người dùng · 📏 {src.get('silver', 0)} luật · 🔁 {src.get('pseudo', 0)} tự gán",
+        f"Dữ liệu: 👤 {src.get('gold', 0)} người dùng · 🤖 {src.get('llm', 0)} Claude · 📏 {src.get('silver', 0)} luật · 🔁 {src.get('pseudo', 0)} tự gán",
         f"Kiểm định ({scope}, {val.get('n', 0)} bài): đúng {val.get('accuracy', 0):.0%} · "
         f"macro-F1 {val.get('macro_f1', 0):.2f} · sai lệch % (ECE) {val.get('ece', 0):.1%}",
     ]
